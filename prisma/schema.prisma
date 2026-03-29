@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id               String   @id @default(cuid())
+  threadsUserId    String   @unique
+  username         String
+  displayName      String?
+  accessToken      String?
+  refreshToken     String?
+  tokenExpiresAt   DateTime?
+  brandTone        String   @default("casual")
+  scanInterval     Int      @default(15)
+  autoPublish      Boolean  @default(false)
+  openaiKey        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  keywords  Keyword[]
+  products  Product[]
+  replies   GeneratedReply[]
+  scanLogs  ScanLog[]
+}
+
+model Keyword {
+  id        String   @id @default(cuid())
+  userId    String
+  keyword   String
+  active    Boolean  @default(true)
+  scanCount Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scannedPosts ScannedPost[]
+
+  @@index([userId])
+}
+
+model Product {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  description  String?
+  affiliateUrl String
+  category     String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ScannedPost {
+  id             String   @id @default(cuid())
+  userId         String
+  keywordId     String
+  threadsPostId String
+  authorName    String
+  content       String
+  likeCount     Int      @default(0)
+  replyCount    Int      @default(0)
+  scannedAt     DateTime @default(now())
+
+  keyword Keyword         @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  reply   GeneratedReply?
+
+  @@unique([threadsPostId])
+  @@index([keywordId])
+}
+
+model GeneratedReply {
+  id            String   @id @default(cuid())
+  userId       String
+  scannedPostId String  @unique
+  productId    String?
+  content      String
+  status       String   @default("pending")
+  publishedAt  DateTime?
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scannedPost ScannedPost @relation(fields: [scannedPostId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+model ScanLog {
+  id          String   @id @default(cuid())
+  userId      String
+  keywordId   String?
+  postsFound  Int      @default(0)
+  status      String   @default("running")
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
