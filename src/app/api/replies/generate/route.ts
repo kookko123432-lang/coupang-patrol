@@ -1,39 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
-import prisma from '@/lib/prisma'
 import { generateAIReply } from '@/lib/ai-generator'
-
-const DEMO_USER_ID = 'demo_user'
 
 export async function POST(req: NextRequest) {
   try {
-    const { scannedPostId, productInfo } = await req.json()
+    const body = await req.json()
+    const { postContent, authorName, productInfo } = body
 
-    const post = await prisma.scannedPost.findUnique({
-      where: { id: scannedPostId },
-    })
-
-    if (!post) return NextResponse.json({ error: '貼文不存在' }, { status: 404 })
+    const content = postContent || '一篇關於購物的貼文'
+    const author = authorName || 'Threads 用戶'
+    const product = productInfo || '酷澎好物'
 
     const replyContent = await generateAIReply({
-      postContent: post.content,
-      authorName: post.authorName,
+      postContent: content,
+      authorName: author,
       brandTone: 'casual',
-      productName: productInfo || '酷澎好物',
+      productName: product,
       productDescription: '',
       affiliateUrl: 'https://www.coupang.com',
     })
 
-    const reply = await prisma.generatedReply.create({
-      data: {
-        userId: DEMO_USER_ID,
-        scannedPostId,
-        content: replyContent,
-        status: 'pending',
-      },
-    })
-
-    return NextResponse.json(reply)
-  } catch {
-    return NextResponse.json({ error: '生成失敗' }, { status: 500 })
+    return NextResponse.json({ content: replyContent })
+  } catch (e: any) {
+    return NextResponse.json({ error: '生成失敗', message: e.message }, { status: 500 })
   }
 }
