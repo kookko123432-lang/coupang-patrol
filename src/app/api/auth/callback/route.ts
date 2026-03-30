@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const APP_ID = process.env.THREADS_APP_ID || '1855584565252934'
+const APP_ID = process.env.THREADS_APP_ID || '1854584565252934'
 const APP_SECRET = process.env.THREADS_APP_SECRET || ''
 const REDIRECT_URI = process.env.THREADS_REDIRECT_URI || 'https://coupang-patrol.vercel.app/api/auth/callback'
 
