@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server'
+import { getPosts } from '@/lib/post-store'
 
 export async function GET() {
-  // Redirect to ingest endpoint which holds the data
-  const res = await fetch(`${process.env.VERCEL_URL ? 'https://' + process.env.VERCEL_URL : 'http://localhost:3456'}/api/scan/ingest`)
-  const data = await res.json()
-  return NextResponse.json(data)
+  const posts = getPosts()
+  return NextResponse.json(posts)
 }
 
 export async function POST() {
-  return NextResponse.json({ 
-    message: '使用本地掃描器搜尋 Threads 貼文',
-    command: 'cd coupang-patrol && npx tsx scanner/search.ts --once',
+  return NextResponse.json({
+    message: '掃描器在 GitHub Actions 上每小時自動運行',
+    manualCommand: 'gh workflow run scan.yml',
+    postsAvailable: getPosts().length,
   })
 }
