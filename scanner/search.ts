@@ -59,7 +59,8 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
 
       // Build a map of postId -> link
       const postLinks = new Map<string, string>()
-      allLinks.forEach((a: HTMLAnchorElement) => {
+      allLinks.forEach((el) => {
+        const a = el as HTMLAnchorElement
         const match = a.href.match(/\/post\/([^?/]+)/)
         if (match) postLinks.set(match[1], a.href)
       })
