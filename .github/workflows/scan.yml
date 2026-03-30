@@ -1,0 +1,39 @@
+name: Threads Scanner
+
+on:
+  schedule:
+    # Run every hour at minute 0
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    # Allow manual trigger from GitHub UI
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Threads Scanner
+        env:
+          APP_URL: https://coupang-patrol.vercel.app
+          KEYWORDS: '酷澎推薦,尿布推薦,韓國零食,Coupang,酷澎,韓國美妝,省錢好物'
+        run: npx tsx scanner/search.ts --once
+
+      - name: Scan Summary
+        if: always()
+        run: echo "✅ Scan completed at $(date)"
