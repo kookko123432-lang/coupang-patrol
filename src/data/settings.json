@@ -1,0 +1,11 @@
+{
+  "brandTone": "casual",
+  "scanInterval": 60,
+  "autoPublish": false,
+  "aiProvider": "zhipu",
+  "openaiKey": "",
+  "googleKey": "",
+  "zhipuKey": "",
+  "platforms": ["threads"],
+  "scanEnabled": true
+}

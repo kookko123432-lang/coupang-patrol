@@ -1,29 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import prisma from '@/lib/prisma'
-
-const DEMO_USER_ID = 'demo_user'
+import { getProducts, addProduct, updateProduct, deleteProduct } from '@/lib/product-store'
 
 export async function GET() {
-  try {
-    const products = await prisma.product.findMany({
-      where: { userId: DEMO_USER_ID },
-      orderBy: { createdAt: 'desc' },
-    })
-    return NextResponse.json(products)
-  } catch {
-    return NextResponse.json([])
-  }
+  return NextResponse.json(getProducts())
 }
 
 export async function POST(req: NextRequest) {
   try {
     const { name, description, affiliateUrl, category } = await req.json()
     if (!name || !affiliateUrl) return NextResponse.json({ error: '名稱和連結為必填' }, { status: 400 })
-
-    const created = await prisma.product.create({
-      data: { userId: DEMO_USER_ID, name, description, affiliateUrl, category },
-    })
-    return NextResponse.json(created)
+    const product = addProduct({ name, description, affiliateUrl, category })
+    return NextResponse.json(product)
   } catch {
     return NextResponse.json({ error: '建立失敗' }, { status: 500 })
   }
@@ -31,17 +18,10 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const { id, name, description, affiliateUrl, category, active } = await req.json()
-    const updated = await prisma.product.update({
-      where: { id },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(description !== undefined && { description }),
-        ...(affiliateUrl !== undefined && { affiliateUrl }),
-        ...(category !== undefined && { category }),
-        ...(active !== undefined && { active }),
-      },
-    })
+    const { id, ...data } = await req.json()
+    if (!id) return NextResponse.json({ error: '缺少 ID' }, { status: 400 })
+    const updated = updateProduct(id, data)
+    if (!updated) return NextResponse.json({ error: '找不到商品' }, { status: 404 })
     return NextResponse.json(updated)
   } catch {
     return NextResponse.json({ error: '更新失敗' }, { status: 500 })
@@ -51,7 +31,9 @@ export async function PUT(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const { id } = await req.json()
-    await prisma.product.delete({ where: { id } })
+    if (!id) return NextResponse.json({ error: '缺少 ID' }, { status: 400 })
+    const ok = deleteProduct(id)
+    if (!ok) return NextResponse.json({ error: '找不到商品' }, { status: 404 })
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: '刪除失敗' }, { status: 500 })
