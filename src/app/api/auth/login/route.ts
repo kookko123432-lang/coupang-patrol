@@ -9,6 +9,7 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('redirect_uri', REDIRECT_URI)
   url.searchParams.set('scope', 'threads_basic,threads_content_publish,threads_manage_replies,threads_read_replies,threads_manage_insights')
   url.searchParams.set('response_type', 'code')
+  url.searchParams.set('force_reauth', 'true')
 
   console.log('OAuth redirect to:', url.toString())
 
