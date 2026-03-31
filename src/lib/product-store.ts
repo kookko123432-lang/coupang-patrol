@@ -1,13 +1,13 @@
-// Shared in-memory store for products
-// In production SaaS, replace with Vercel Postgres
+import { get, set } from './store'
 
-let products: any[] = []
+const KEY = 'products'
 
-export function getProducts() {
-  return products
+export async function getProducts() {
+  return (await get(KEY)) || []
 }
 
-export function addProduct(data: { name: string; description?: string; affiliateUrl: string; category?: string }) {
+export async function addProduct(data: { name: string; description?: string; affiliateUrl: string; category?: string }) {
+  const products = await getProducts()
   const product = {
     id: `prod_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     ...data,
@@ -15,19 +15,22 @@ export function addProduct(data: { name: string; description?: string; affiliate
     createdAt: new Date().toISOString(),
   }
   products.push(product)
+  await set(KEY, products)
   return product
 }
 
-export function updateProduct(id: string, data: any) {
-  const idx = products.findIndex(p => p.id === id)
+export async function updateProduct(id: string, data: any) {
+  const products = await getProducts()
+  const idx = products.findIndex((p: any) => p.id === id)
   if (idx === -1) return null
   products[idx] = { ...products[idx], ...data }
+  await set(KEY, products)
   return products[idx]
 }
 
-export function deleteProduct(id: string) {
-  const idx = products.findIndex(p => p.id === id)
-  if (idx === -1) return false
-  products.splice(idx, 1)
-  return true
+export async function deleteProduct(id: string) {
+  const products = await getProducts()
+  const filtered = products.filter((p: any) => p.id !== id)
+  await set(KEY, filtered)
+  return filtered.length < products.length
 }

@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { addPosts, getPosts } from '@/lib/post-store'
+import { getPosts, addPosts } from '@/lib/post-store'
+
+export async function GET() {
+  const posts = await getPosts()
+  return NextResponse.json(posts)
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -7,13 +12,9 @@ export async function POST(req: NextRequest) {
     if (!posts || !Array.isArray(posts)) {
       return NextResponse.json({ error: 'No posts' }, { status: 400 })
     }
-    const result = addPosts(posts)
+    const result = await addPosts(posts)
     return NextResponse.json({ ok: true, ...result })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
-}
-
-export async function GET() {
-  return NextResponse.json(getPosts())
 }

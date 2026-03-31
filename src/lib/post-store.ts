@@ -1,21 +1,22 @@
-// Shared in-memory store for scanned posts
-// Both /api/scan and /api/scan/ingest import from here
+import { get, set } from './store'
 
-let scannedPosts: any[] = []
+const KEY = 'scanned_posts'
 
-export function getPosts() {
-  return scannedPosts.sort((a, b) => 
+export async function getPosts() {
+  const posts = (await get(KEY)) || []
+  return posts.sort((a: any, b: any) =>
     new Date(b.scannedAt).getTime() - new Date(a.scannedAt).getTime()
   )
 }
 
-export function addPosts(posts: any[]): { added: number; total: number } {
-  const existingIds = new Set(scannedPosts.map(p => p.threadsPostId))
+export async function addPosts(posts: any[]): Promise<{ added: number; total: number }> {
+  const existing = await getPosts()
+  const existingIds = new Set(existing.map((p: any) => p.threadsPostId))
   let added = 0
 
   for (const post of posts) {
     if (!existingIds.has(post.threadsPostId)) {
-      scannedPosts.push({
+      existing.push({
         ...post,
         id: `sp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         scannedAt: new Date().toISOString(),
@@ -25,10 +26,16 @@ export function addPosts(posts: any[]): { added: number; total: number } {
     }
   }
 
-  // Keep max 500
-  if (scannedPosts.length > 500) {
-    scannedPosts = scannedPosts.slice(-500)
-  }
+  const toSave = existing.length > 500 ? existing.slice(-500) : existing
+  await set(KEY, toSave)
+  return { added, total: toSave.length }
+}
 
-  return { added, total: scannedPosts.length }
+export async function updatePost(id: string, data: any) {
+  const posts = await getPosts()
+  const idx = posts.findIndex((p: any) => p.id === id)
+  if (idx === -1) return null
+  posts[idx] = { ...posts[idx], ...data }
+  await set(KEY, posts)
+  return posts[idx]
 }

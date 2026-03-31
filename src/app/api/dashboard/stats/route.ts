@@ -4,12 +4,14 @@ import { getKeywords } from '@/lib/keyword-store'
 import { getProducts } from '@/lib/product-store'
 
 export async function GET() {
-  const posts = getPosts()
-  const keywords = getKeywords()
-  const products = getProducts()
+  const [posts, keywords, products] = await Promise.all([
+    getPosts(),
+    getKeywords(),
+    getProducts(),
+  ])
 
-  const pendingReplies = posts.filter(p => p.status === 'new').length
-  const publishedReplies = posts.filter(p => p.status === 'replied').length
+  const pendingReplies = posts.filter((p: any) => p.status === 'new').length
+  const publishedReplies = posts.filter((p: any) => p.status === 'replied').length
 
   return NextResponse.json({
     stats: {
@@ -19,14 +21,12 @@ export async function GET() {
       pendingReplies,
       publishedReplies,
     },
-    activities: [
-      ...posts.slice(0, 5).map(p => ({
-        id: p.id,
-        type: 'scan',
-        message: `掃描到 @${p.authorName} 的貼文 (${p.keyword})`,
-        time: getTimeAgo(p.scannedAt),
-      })),
-    ],
+    activities: posts.slice(0, 5).map((p: any) => ({
+      id: p.id,
+      type: 'scan',
+      message: `掃描到 @${p.authorName} 的貼文 (${p.keyword})`,
+      time: getTimeAgo(p.scannedAt),
+    })),
   })
 }
 
