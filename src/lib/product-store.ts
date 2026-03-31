@@ -22,7 +22,12 @@ export interface Product {
 }
 
 export async function getProducts(): Promise<Product[]> {
-  return (await get(KEY)) || []
+  const raw = (await get(KEY)) || []
+  // Ensure every product has keywords array (migration from old format)
+  return raw.map((p: any) => ({
+    ...p,
+    keywords: p.keywords || [],
+  }))
 }
 
 export async function addProduct(data: { name: string; description?: string; affiliateUrl: string; category?: string }) {
