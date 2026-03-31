@@ -6,99 +6,72 @@ const REDIRECT_URI = (process.env.THREADS_REDIRECT_URI || 'https://coupang-patro
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
-  const error = req.nextUrl.searchParams.get('error')
+  const errParam = req.nextUrl.searchParams.get('error')
 
-  if (error) {
-    return NextResponse.redirect(new URL(`/dashboard/accounts?error=${encodeURIComponent(error)}`, req.url))
+  if (errParam) {
+    return NextResponse.redirect(new URL('/dashboard/accounts?error=' + encodeURIComponent(errParam), req.url))
   }
-
   if (!code) {
     return NextResponse.redirect(new URL('/dashboard/accounts?error=no_code', req.url))
   }
 
   try {
-    // Step 1: Exchange code for short-lived token
+    // Step 1: Exchange code for token
     const tokenRes = await fetch('https://graph.threads.net/v1.0/access_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: APP_ID,
-        client_secret: APP_SECRET,
-        grant_type: 'authorization_code',
-        redirect_uri: REDIRECT_URI,
-        code,
-      }),
+      body: new URLSearchParams({ client_id: APP_ID, client_secret: APP_SECRET, grant_type: 'authorization_code', redirect_uri: REDIRECT_URI, code }),
     })
-
-    const shortToken = await tokenRes.json()
-
-    if (!shortToken.access_token) {
-      console.error('Short token exchange failed:', shortToken)
-      return NextResponse.redirect(new URL(`/dashboard/accounts?error=token_failed`, req.url))
+    const tokenData = await tokenRes.json()
+    if (!tokenData.access_token) {
+      console.error('Token exchange failed:', JSON.stringify(tokenData))
+      return NextResponse.redirect(new URL('/dashboard/accounts?error=token_failed', req.url))
     }
 
-    // Step 2: Exchange for long-lived token (60 days)
-    let finalToken = shortToken.access_token
-    let expiresIn = shortToken.expires_in || 86400
+    let finalToken = tokenData.access_token
+    let expiresIn = tokenData.expires_in || 86400
 
+    // Step 2: Try long-lived token
     try {
-      const longTokenRes = await fetch(
-        `https://graph.threads.net/v1.0/access_token?grant_type=th_exchange_token&client_id=${APP_ID}&client_secret=${APP_SECRET}&access_token=${shortToken.access_token}`
+      const longRes = await fetch(
+        'https://graph.threads.net/v1.0/access_token?grant_type=th_exchange_token&client_id=' + APP_ID + '&client_secret=' + APP_SECRET + '&access_token=' + finalToken
       )
-      const longToken = await longTokenRes.json()
-      if (longToken.access_token) {
-        finalToken = longToken.access_token
-        expiresIn = longToken.expires_in || 5184000 // 60 days
-        console.log('Long-lived token obtained, expires in:', expiresIn)
+      const longData = await longRes.json()
+      if (longData.access_token) {
+        finalToken = longData.access_token
+        expiresIn = longData.expires_in || 5184000
       }
-    } catch (e) {
-      console.log('Long token exchange failed, using short token:', e)
-    }
-
-    // Step 3: Store token in Redis (so we can update it without redeploying)
-    const { set } = await import('@/lib/store')
-    await set('threads_token', {
-      accessToken: finalToken,
-      obtainedAt: new Date().toISOString(),
-      expiresIn,
-    })
-
-    // Step 4: Also update Vercel env var if possible
-    try {
-      await updateVercelEnvVar('THREADS_ACCESS_TOKEN', finalToken)
-    } catch (e) {
-      console.log('Vercel env update skipped:', e)
-    }
-
-    // Step 5: Get profile for redirect message
-    let username = ''
-    try {
-      const profileRes = await fetch(
-        `https://graph.threads.net/v1.0/me?fields=username&access_token=${finalToken}`
-      )
-      const profile = await profileRes.json()
-      username = profile.username || ''
     } catch {}
 
-    // Redirect to accounts page with success
-    return NextResponse.redirect(
-      new URL(`/dashboard/accounts?connected=true&username=${username}`, req.url)
-    )
+    // Step 3: Get profile
+    const profileRes = await fetch('https://graph.threads.net/v1.0/me?fields=id,username,name&access_token=' + finalToken)
+    const profile = await profileRes.json()
+    if (!profile.id) {
+      console.error('Profile failed:', JSON.stringify(profile))
+      return NextResponse.redirect(new URL('/dashboard/accounts?error=profile_failed', req.url))
+    }
+
+    // Step 4: Save token
+    const store = await import('@/lib/store')
+    await store.set('threads_token', { accessToken: finalToken, userId: profile.id, username: profile.username, obtainedAt: new Date().toISOString(), expiresIn })
+
+    // Step 5: Save to accounts list
+    const accountStore = await import('@/lib/account-store')
+    const existing = await accountStore.getAccounts()
+    const existingAcc = existing.find((a: any) => a.platform === 'threads' && a.platformUserId === String(profile.id))
+
+    if (!existingAcc) {
+      await accountStore.addAccount({ platform: 'threads', platformUserId: String(profile.iid), username: profile.username || '', name: profile.name || profile.username || '', accessToken: finalToken, connected: true })
+      console.log('New account added:', profile.username)
+    } else {
+      await accountStore.updateAccount(existingAcc.id, { accessToken: finalToken, connected: true })
+      console.log('Account token refreshed:', profile.username)
+    }
+
+    // Step 6: Redirect with success
+    return NextResponse.redirect(new URL('/dashboard/accounts?connected=true&username=' + (profile.username || ''), req.url))
   } catch (e: any) {
     console.error('Auth callback error:', e)
-    return NextResponse.redirect(new URL(`/dashboard/accounts?error=${encodeURIComponent(e.message)}`, req.url))
+    return NextResponse.redirect(new URL('/dashboard/accounts?error=' + encodeURIComponent(e.message), req.url))
   }
-}
-
-async function updateVercelEnvVar(key: string, value: string) {
-  // Use Vercel API to update env var
-  const token = process.env.VERCEL_OIDC_TOKEN || process.env.VERCEL_TOKEN
-  if (!token) return
-
-  const projectId = process.env.VERCEL_PROJECT_ID
-  if (!projectId) return
-
-  // This requires Vercel API access — may not work in all cases
-  // The Redis fallback ensures the token is always saved
-  console.log('Attempting to update Vercel env var:', key)
 }
