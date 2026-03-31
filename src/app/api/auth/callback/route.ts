@@ -18,8 +18,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Step 1: Exchange code for token
-    const tokenRes = await fetch('https://graph.threads.net/v1.0/access_token', {
+    // Step 1: Exchange code for token (correct endpoint: /oauth/access_token)
+    const tokenRes = await fetch('https://graph.threads.net/oauth/access_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
