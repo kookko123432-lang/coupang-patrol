@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const APP_ID = process.env.THREADS_APP_ID || '1854584565252934'
-const APP_SECRET = process.env.THREADS_APP_SECRET || ''
-const REDIRECT_URI = process.env.THREADS_REDIRECT_URI || 'https://coupang-patrol.vercel.app/api/auth/callback'
+const APP_ID = (process.env.THREADS_APP_ID || '1854584565252934').trim()
+const APP_SECRET = (process.env.THREADS_APP_SECRET || '').trim()
+const REDIRECT_URI = (process.env.THREADS_REDIRECT_URI || 'https://coupang-patrol.vercel.app/api/auth/callback').trim()
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
