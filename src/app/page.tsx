@@ -158,7 +158,10 @@ export default function HomePage() {
             <Shield className="w-4 h-4" />
             <span>Coupang Patrol</span>
           </div>
-          <span>© 2024 Coupang Patrol. 僅供展示用途。</span>
+          <div className="flex items-center gap-4">
+            <Link href="/privacy" className="hover:text-gray-300 transition-colors">隱私權政策</Link>
+            <Link href="/terms" className="hover:text-gray-300 transition-colors">服務條款</Link>
+          </div>
         </div>
       </footer>
     </div>
