@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server'
-import { isTokenConfigured, getProfile, getQuota, getMyPosts } from '@/lib/threads-api'
+import { getProfile, getQuota, getMyPosts, isTokenConfigured, getToken } from '@/lib/threads-api'
 
 export async function GET() {
-  if (!isTokenConfigured()) {
-    return NextResponse.json({
-      connected: false,
-      message: 'Threads API Token 未設定',
-    })
+  // Quick check if any token is available
+  const token = await getToken()
+  if (!token) {
+    return NextResponse.json({ connected: false, error: '未設定 Token' })
   }
 
   try {
@@ -16,20 +15,21 @@ export async function GET() {
       getMyPosts(3).catch(() => []),
     ])
 
+    if (!profile) {
+      return NextResponse.json({ connected: false, error: 'Token 已過期，請重新連結' })
+    }
+
     return NextResponse.json({
       connected: true,
       profile,
       quota: quota ? {
         used: quota.quota_usage,
-        total: quota.config.quota_total,
-        resetIn: quota.config.quota_duration,
+        total: quota.config?.quota_total || 250,
+        resetInHours: Math.round((quota.config?.quota_duration || 86400) / 3600),
       } : null,
       recentPosts,
     })
   } catch (e: any) {
-    return NextResponse.json({
-      connected: false,
-      error: e.message,
-    })
+    return NextResponse.json({ connected: false, error: e.message })
   }
 }
