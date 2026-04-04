@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
-  Key,
   Package,
   ScanSearch,
   BarChart3,
@@ -61,14 +60,8 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="p-4 border-t border-gray-800/50">
-        <div className="flex items-center gap-3 px-3 py-2">
-          <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400 text-sm font-bold">
-            D
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-gray-200 truncate">Demo 用戶</div>
-            <div className="text-xs text-gray-500">demo@example.com</div>
-          </div>
+        <div className="px-3 py-2 text-xs text-gray-600">
+          帳號資料完全隔離 — 上方選擇帳號切換
         </div>
       </div>
     </aside>

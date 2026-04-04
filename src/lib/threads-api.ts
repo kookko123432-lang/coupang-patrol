@@ -33,6 +33,10 @@ async function refreshLongLivedToken(accessToken: string): Promise<string | null
   return null
 }
 
+export function isTokenConfigured(): boolean {
+  return !!(process.env.THREADS_ACCESS_TOKEN || '').trim()
+}
+
 export async function getToken(): Promise<string> {
   if (cachedToken && Date.now() - tokenCheckedAt < 300000) return cachedToken
 
@@ -41,8 +45,9 @@ export async function getToken(): Promise<string> {
     const data = await get('threads_token')
     if (data?.accessToken) {
       const obtainedAt = data.obtainedAt ? new Date(data.obtainedAt).getTime() : 0
+      const age = Date.now() - obtainedAt
       // Auto-refresh if older than 50 days
-      if (age > 50 * 24 * 60 * 60 * 1000) {
+      if (obtainedAt > 0 && age > 50 * 24 * 60 * 60 * 1000) {
         const refreshed = await refreshLongLivedToken(data.accessToken)
         if (refreshed) {
           cachedToken = refreshed
@@ -61,6 +66,28 @@ export async function getToken(): Promise<string> {
   return cachedToken
 }
 
+export async function getProfile() {
+  const token = await getToken()
+  const res = await fetch(`${API_BASE}/me?fields=id,username,name,threads_profile_picture_url&access_token=${token}`)
+  if (!res.ok) return null
+  return res.json()
+}
+
+export async function getQuota() {
+  const token = await getToken()
+  const res = await fetch(`${API_BASE}/${THREADS_USER_ID}/threads_publishing_limit?fields=config,quota_usage&access_token=${token}`)
+  if (!res.ok) return null
+  return res.json()
+}
+
+export async function getMyPosts(limit: number = 10) {
+  const token = await getToken()
+  const res = await fetch(`${API_BASE}/${THREADS_USER_ID}/threads?fields=id,text,timestamp,media_type&limit=${limit}&access_token=${token}`)
+  if (!res.ok) return []
+  const data = await res.json()
+  return data.data || []
+}
+
 export async function publishPost(text: string): Promise<string> {
   const token = await getToken()
 
@@ -75,6 +102,7 @@ export async function publishPost(text: string): Promise<string> {
     throw new Error(`Create post error (${createRes.status}): ${err}`)
   }
   const { id: mediaId } = await createRes.json()
+
   const publishRes = await fetch(`${API_BASE}/${THREADS_USER_ID}/threads_publish?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -101,6 +129,7 @@ export async function replyToPost(postId: string, text: string): Promise<string>
     throw new Error(`Create reply error: ${err}`)
   }
   const { id: mediaId } = await createRes.json()
+
   const publishRes = await fetch(`${API_BASE}/${THREADS_USER_ID}/threads_publish?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -121,4 +150,3 @@ export async function getPostInsights(postId: string) {
   const data = await res.json()
   return data.data || []
 }
-
