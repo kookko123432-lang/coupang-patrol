@@ -39,7 +39,7 @@ const INTERVAL_OPTIONS = [
 
 const PLATFORMS = [
   { id: 'threads', name: 'Threads', available: true },
-  { id: 'twitter', name: 'X / Twitter', available: false },
+  { id: 'twitter', name: 'X / Twitter', available: true },
   { id: 'instagram', name: 'Instagram', available: false },
 ]
 

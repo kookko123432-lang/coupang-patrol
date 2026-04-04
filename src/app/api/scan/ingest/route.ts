@@ -1,18 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getPosts, addPosts } from '@/lib/post-store'
-
-export async function GET() {
-  const posts = await getPosts()
-  return NextResponse.json(posts)
-}
+import { addPosts } from '@/lib/post-store'
 
 export async function POST(req: NextRequest) {
   try {
-    const { posts } = await req.json()
-    if (!posts || !Array.isArray(posts)) {
-      return NextResponse.json({ error: 'No posts' }, { status: 400 })
+    const body = await req.json()
+
+    // Support both { posts: [...] } and plain array from Threads scanner
+    // Also support { posts: [...] } from X scanner
+    const rawPosts = Array.isArray(body) ? body : body.posts
+    if (!rawPosts || !Array.isArray(rawPosts)) {
+      return NextResponse.json({ error: 'No posts array' }, { status: 400 })
     }
-    const result = await addPosts(posts)
+
+    // Normalize: Threads scanner sends flat objects, X scanner wraps in { posts }
+    const result = await addPosts(rawPosts)
     return NextResponse.json({ ok: true, ...result })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })

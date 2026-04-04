@@ -32,11 +32,16 @@ interface Product {
 
 interface ScanPost {
   id: string
+  platform: 'threads' | 'x' | 'twitter'
+  platformPostId: string
   threadsPostId: string
+  xPostId?: string
   authorName: string
+  authorHandle?: string
   content: string
   likeCount: number
   replyCount: number
+  repostCount?: number
   keyword: string
   url: string
   scannedAt: string
@@ -508,7 +513,10 @@ export default function PatrolPage() {
                               selectedPost?.id === post.id ? 'bg-blue-500/10' : 'hover:bg-gray-800/20'
                             }`}>
                             <div className="flex items-center justify-between mb-1">
-                              <span className="text-xs font-medium text-gray-300">@{post.authorName}</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs">{post.platform === 'x' ? '𝕏' : '🧵'}</span>
+                                <span className="text-xs font-medium text-gray-300">@{post.authorName}</span>
+                              </div>
                               <div className="flex items-center gap-2 text-xs text-gray-600">
                                 <span className="flex items-center gap-0.5"><Heart className="w-3 h-3" />{post.likeCount}</span>
                                 <span className="flex items-center gap-0.5"><MessageCircle className="w-3 h-3" />{post.replyCount}</span>
@@ -571,7 +579,10 @@ export default function PatrolPage() {
                         selectedPost?.id === post.id ? 'bg-blue-500/10' : 'hover:bg-gray-800/20'
                       }`}>
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-gray-300">@{post.authorName}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs">{post.platform === 'x' ? '𝕏' : '🧵'}</span>
+                          <span className="text-xs font-medium text-gray-300">@{post.authorName}</span>
+                        </div>
                         <span className="text-xs text-yellow-500">keyword: {post.keyword}</span>
                       </div>
                       <p className="text-xs text-gray-400 line-clamp-2">{post.content}</p>

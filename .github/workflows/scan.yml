@@ -1,4 +1,4 @@
-name: Threads Scanner
+name: Patrol Scanner
 
 on:
   schedule:
@@ -10,7 +10,7 @@ on:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repo
@@ -30,6 +30,8 @@ jobs:
 
       - name: Fetch keywords from product store
         id: keywords
+        env:
+          APP_URL: https://coupang-patrol.vercel.app
         run: |
           KEYWORDS=$(curl -s $APP_URL/api/products/keywords/scan | python3 -c "import sys,json; d=json.load(sys.stdin); print(','.join(d['keywords']))" 2>/dev/null)
           if [ -z "$KEYWORDS" ]; then
@@ -46,6 +48,14 @@ jobs:
           APP_URL: https://coupang-patrol.vercel.app
           KEYWORDS: ${{ steps.keywords.outputs.keywords }}
         run: npx tsx scanner/search.ts --once
+
+      - name: Run X (Twitter) Scanner
+        if: steps.keywords.outputs.keywords != ''
+        env:
+          APP_URL: https://coupang-patrol.vercel.app
+          KEYWORDS: ${{ steps.keywords.outputs.keywords }}
+          X_AUTH_COOKIES: ${{ secrets.X_AUTH_COOKIES }}
+        run: npx tsx scanner/x-search.ts --once
 
       - name: Scan Summary
         if: always()
