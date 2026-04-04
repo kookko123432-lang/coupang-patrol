@@ -170,7 +170,7 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
           }
         }
         
-        if (text.length > 20) {
+        if (text.length > 20 && !text.startsWith('Join Threads')) {
           items.push({
             text,
             username,
@@ -300,6 +300,11 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
           // Take the longest meaningful text block as the post content
           if (textParts.length > 0) {
             fullText = textParts.reduce((a, b) => a.length >= b.length ? a : b, '')
+          }
+          
+          // Filter out login wall / placeholder text
+          if (fullText.startsWith('Join Threads') || fullText.startsWith('Log in to see')) {
+            fullText = ''
           }
           
           return { mediaId, fullText }
