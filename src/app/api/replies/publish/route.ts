@@ -12,16 +12,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (threadsPostId) {
-      // Check if this is a short ID (like "DWeGQiejw8D") — needs conversion to long media ID
+      // Convert short shortcode (e.g. "DWeGQiejw8D") to long media ID if needed
       if (threadsPostId.length < 20) {
-        try {
-          const longId = await resolveShortId(threadsPostId)
-          if (longId) {
-            threadsPostId = longId
-          }
-        } catch (e) {
-          console.error('Failed to resolve short ID:', e)
-        }
+        threadsPostId = shortcodeToMediaId(threadsPostId)
       }
 
       const publishedId = await replyToPost(threadsPostId, content)
@@ -47,21 +40,14 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function resolveShortId(shortId: string): Promise<string | null> {
-  // Try to resolve a short Threads post ID to a long media ID
-  // by fetching the post info via the Threads API
-  const token = await getToken()
-  
-  // Method 1: Try the short ID directly as a media ID
-  try {
-    const res = await fetch(
-      `https://graph.threads.net/v1.0/${shortId}?fields=id&access_token=${token}`
-    )
-    if (res.ok) {
-      const data = await res.json()
-      if (data.id) return data.id
-    }
-  } catch {}
-
-  return null
+// Convert Threads shortcode (e.g. "DWeGQiejw8D") to numeric media ID
+function shortcodeToMediaId(shortcode: string): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+  let mediaId = 0n
+  for (const char of shortcode) {
+    const idx = alphabet.indexOf(char)
+    if (idx === -1) return shortcode // fallback: return as-is
+    mediaId = mediaId * 64n + BigInt(idx)
+  }
+  return mediaId.toString()
 }
