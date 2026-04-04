@@ -241,52 +241,78 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
   }
 
   // Step 2: For posts without media IDs, visit each post page to extract the media ID
-  // from the page's internal data
+  // AND the full post content from the actual post page (more accurate than search results)
   const postsNeedingIds = results.filter(p => p.threadsPostId.length < 20)
-  if (postsNeedingIds.length > 0) {
-    console.log(`  🔗 Resolving media IDs for ${postsNeedingIds.length} posts...`)
-    for (const post of postsNeedingIds.slice(0, 15)) { // limit to avoid too many requests
+  // Also re-fetch content for posts that got messy text from search results
+  const postsNeedingContent = results.filter(p =>
+    p.content.includes('Verified') || p.content.length < 30 || /\d{2}\/\d{2}\/\d{2}/.test(p.content)
+  )
+  const postsToVisit = new Set([
+    ...postsNeedingIds,
+    ...postsNeedingContent,
+  ])
+  
+  if (postsToVisit.size > 0) {
+    console.log(`  🔗 Visiting ${postsToVisit.size} posts to get accurate content + media IDs...`)
+    for (const post of postsToVisit) {
       try {
         const postPage = await context.newPage()
         await postPage.goto(post.url, { waitUntil: 'domcontentloaded', timeout: 15000 })
-        await postPage.waitForTimeout(2000)
+        await postPage.waitForTimeout(2500)
         
-        // Try to find the media ID in the page
-        const pageMediaId = await postPage.evaluate(() => {
-          // Check meta tags
+        const pageData = await postPage.evaluate(() => {
+          let mediaId = ''
+          let fullText = ''
+          
+          // Extract media ID from meta tags or scripts
           const ogUrl = document.querySelector('meta[property="al:android:url"]')
           if (ogUrl) {
             const content = ogUrl.getAttribute('content') || ''
             const match = content.match(/post\/(\d{17,20})/)
-            if (match) return match[1]
+            if (match) mediaId = match[1]
           }
           
-          // Check all links for numeric post IDs
-          const links = document.querySelectorAll('a[href*="/post/"]')
-          for (const link of links) {
-            const href = link.getAttribute('href') || ''
-            const match = href.match(/\/post\/(\d{17,20})/)
-            if (match) return match[1]
+          if (!mediaId) {
+            const scripts = document.querySelectorAll('script')
+            for (const script of scripts) {
+              const text = script.textContent || ''
+              const mediaMatch = text.match(/"media_id"\s*:\s*"?(\d{17,20})"?/)
+              if (mediaMatch) { mediaId = mediaMatch[1]; break }
+              const pkMatch = text.match(/"pk"\s*:\s*"?(\d{17,20})"?/)
+              if (pkMatch) { mediaId = pkMatch[1]; break }
+            }
           }
           
-          // Check script tags for embedded data
-          const scripts = document.querySelectorAll('script')
-          for (const script of scripts) {
-            const text = script.textContent || ''
-            // Look for "media_id":"NUMBER" or "pk":"NUMBER" patterns
-            const mediaMatch = text.match(/"media_id"\s*:\s*"?(\d{17,20})"?/)
-            if (mediaMatch) return mediaMatch[1]
-            const pkMatch = text.match(/"pk"\s*:\s*"?(\d{17,20})"?/)
-            if (pkMatch) return pkMatch[1]
+          // Extract full post content — look for the main post text area
+          // Threads post pages have a specific structure
+          const spans = document.querySelectorAll('span[dir="auto"]')
+          const textParts: string[] = []
+          spans.forEach((s: Element) => {
+            const t = s.textContent?.trim() || ''
+            // Skip if it looks like a username, date, or UI element
+            if (t.length < 5) return
+            if (/^\d{2}\/\d{2}\/\d{2}$/.test(t)) return
+            if (/^(Verified|Like|Reply|Share|More|Follow|Repost)$/i.test(t)) return
+            if (t.startsWith('@')) return
+            textParts.push(t)
+          })
+          
+          // Take the longest meaningful text block as the post content
+          if (textParts.length > 0) {
+            fullText = textParts.reduce((a, b) => a.length >= b.length ? a : b, '')
           }
           
-          return ''
+          return { mediaId, fullText }
         })
         
-        if (pageMediaId) {
-          post.threadsPostId = pageMediaId
-          console.log(`    ✅ ${post.url.substring(post.url.lastIndexOf('/'))} → ${pageMediaId}`)
+        if (pageData.mediaId) {
+          post.threadsPostId = pageData.mediaId
         }
+        if (pageData.fullText) {
+          post.content = pageData.fullText
+        }
+        
+        console.log(`    ✅ ${post.authorName}: "${post.content.substring(0, 50)}..." ${pageData.mediaId ? `(id: ${pageData.mediaId})` : ''}`)
         
         await postPage.close().catch(() => {})
         await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000))
