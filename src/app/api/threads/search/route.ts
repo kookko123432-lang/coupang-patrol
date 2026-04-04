@@ -4,27 +4,47 @@ import { getTokenAndUserId } from '@/lib/threads-api'
 export async function GET(req: NextRequest) {
   const { token, userId } = await getTokenAndUserId()
   if (!token || !userId) {
-    return NextResponse.json({ error: '未設定 Token' }, { status: 400 })
+    return NextResponse.json({ error: '未連結帳號' }, { status: 400 })
   }
 
-  const keyword = req.nextUrl.searchParams.get('q') || '宵夜'
-  const limit = req.nextUrl.searchParams.get('limit') || '10'
+  const q = req.nextUrl.searchParams.get('q') || '酷澎'
+  
+  // Try multiple endpoint formats
+  const attempts = [
+    // Format 1: /v1.0/{user_id}/threads_keyword_search
+    { name: 'user_id/threads_keyword_search', url: `https://graph.threads.net/v1.0/${userId}/threads_keyword_search?q=${encodeURIComponent(q)}&access_token=${token}` },
+    // Format 2: /v1.0/me/threads_keyword_search  
+    { name: 'me/threads_keyword_search', url: `https://graph.threads.net/v1.0/me/threads_keyword_search?q=${encodeURIComponent(q)}&access_token=${token}` },
+    // Format 3: /v1.0/threads_keyword_search (no user context)
+    { name: 'threads_keyword_search (root)', url: `https://graph.threads.net/v1.0/threads_keyword_search?q=${encodeURIComponent(q)}&access_token=${token}` },
+    // Format 4: /v1.0/{user_id}/threads_search
+    { name: 'user_id/threads_search', url: `https://graph.threads.net/v1.0/${userId}/threads_search?q=${encodeURIComponent(q)}&access_token=${token}` },
+  ]
 
-  // Try Threads keyword search API
-  const searchUrl = `https://graph.threads.net/v1.0/${userId}/threads_keyword_search?q=${encodeURIComponent(keyword)}&fields=id,text,username,timestamp,like_count,shortcode,permalink&limit=${limit}&access_token=${token}`
+  const results: any = {}
 
-  console.log('Searching:', searchUrl.replace(token, '***'))
-
-  try {
-    const res = await fetch(searchUrl)
-    const data = await res.json()
-
-    if (!res.ok) {
-      return NextResponse.json({ error: 'Search failed', status: res.status, details: data }, { status: 500 })
+  for (const attempt of attempts) {
+    try {
+      console.log(`Trying: ${attempt.name}`)
+      const res = await fetch(attempt.url)
+      const data = await res.json()
+      results[attempt.name] = {
+        status: res.status,
+        data: data,
+      }
+      if (res.ok && data.data) {
+        // Found a working endpoint!
+        return NextResponse.json({
+          working: attempt.name,
+          keyword: q,
+          results: data.data,
+          raw: data,
+        })
+      }
+    } catch (e: any) {
+      results[attempt.name] = { error: e.message }
     }
-
-    return NextResponse.json({ keyword, results: data })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
   }
+
+  return NextResponse.json({ attempts: results, keyword: q })
 }
