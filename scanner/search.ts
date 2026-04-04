@@ -122,7 +122,7 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
         likes: number
       }> = []
 
-      // Strategy: Look at ALL elements with post links, then walk up to find the nearest
+    // Strategy: Look at ALL elements with post links, then walk up to find the nearest
       // element that also contains a long numeric ID (the Threads media ID)
       const postLinks = document.querySelectorAll('a[href*="/post/"]')
       const seen = new Set<string>()
@@ -181,6 +181,25 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
         }
       })
 
+    // Strategy 3: Look for __NEXT_DATA__ or similar script tags with embedded data
+    const scripts = document.querySelectorAll('script[type="application/json"], script:notmodule]')
+    const jsonBlocks: string[] = []
+    scripts.forEach(script => {
+      try {
+        const text = script.textContent
+        // Look for shortcodes near long IDs patterns
+        const shortcodeMatches = [...text.matchAll(/"code"\s*:\s*"([A-Za-z0-9_]{8,15})"/g)]
+        const idMatches = [...text.matchAll(/"(?:media_id|pk|id)"\s*:\s*"?(\d{17,20})"?/g)]
+        
+        for (const sc of shortcodeMatches) {
+          const scText = sc[1]
+          for (const id of idMatches) {
+            capturedMediaIds.set(scText, id[1])
+          }
+        }
+      } catch {}
+    })
+
       // If the above didn't work, try the old article-based approach
       if (items.length === 0) {
         const articles = document.querySelectorAll('article, [role="article"], [data-pressable-container]')
@@ -236,7 +255,62 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
   } catch (e: any) {
     console.error(`  ❌ Error: ${e.message.substring(0, 100)}`)
   } finally {
+    // Don't close page yet - we need context for Step 2
     await page.close().catch(() => {})
+  }
+
+  // Step 2: For posts without media IDs, visit each post page to extract the media ID
+  // from the page's internal data
+  const postsNeedingIds = results.filter(p => p.threadsPostId.length < 20)
+  if (postsNeedingIds.length > 0) {
+    console.log(`  🔗 Resolving media IDs for ${postsNeedingIds.length} posts...`)
+    for (const post of postsNeedingIds.slice(0, 15)) { // limit to avoid too many requests
+      try {
+        const postPage = await context.newPage()
+        await postPage.goto(post.url, { waitUntil: 'domcontentloaded', timeout: 15000 })
+        await postPage.waitForTimeout(2000)
+        
+        // Try to find the media ID in the page
+        const pageMediaId = await postPage.evaluate(() => {
+          // Check meta tags
+          const ogUrl = document.querySelector('meta[property="al:android:url"]')
+          if (ogUrl) {
+            const content = ogUrl.getAttribute('content') || ''
+            const match = content.match(/post\/(\d{17,20})/)
+            if (match) return match[1]
+          }
+          
+          // Check all links for numeric post IDs
+          const links = document.querySelectorAll('a[href*="/post/"]')
+          for (const link of links) {
+            const href = link.getAttribute('href') || ''
+            const match = href.match(/\/post\/(\d{17,20})/)
+            if (match) return match[1]
+          }
+          
+          // Check script tags for embedded data
+          const scripts = document.querySelectorAll('script')
+          for (const script of scripts) {
+            const text = script.textContent || ''
+            // Look for "media_id":"NUMBER" or "pk":"NUMBER" patterns
+            const mediaMatch = text.match(/"media_id"\s*:\s*"?(\d{17,20})"?/)
+            if (mediaMatch) return mediaMatch[1]
+            const pkMatch = text.match(/"pk"\s*:\s*"?(\d{17,20})"?/)
+            if (pkMatch) return pkMatch[1]
+          }
+          
+          return ''
+        })
+        
+        if (pageMediaId) {
+          post.threadsPostId = pageMediaId
+          console.log(`    ✅ ${post.url.substring(post.url.lastIndexOf('/'))} → ${pageMediaId}`)
+        }
+        
+        await postPage.close().catch(() => {})
+        await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000))
+      } catch {}
+    }
   }
 
   return results
