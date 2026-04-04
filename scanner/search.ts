@@ -8,7 +8,7 @@
  * Runs on: Local Mac, GitHub Actions, VPS
  */
 
-import { chromium, type Browser, type BrowserContext } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type Response } from 'playwright'
 
 const APP_URL = process.env.APP_URL || 'https://coupang-patrol.vercel.app'
 const SCAN_INTERVAL_MS = 15 * 60 * 1000
@@ -27,9 +27,65 @@ interface ScannedPost {
   url: string
 }
 
+// Map shortcodes to media IDs captured from API responses
+const shortcodeToMediaId = new Map<string, string>()
+
+function extractMediaIdsFromResponse(response: Response) {
+  try {
+    const url = response.url()
+    // Threads uses GraphQL or REST APIs that return post data with media IDs
+    if (!url.includes('graphql') && !url.includes('api') && !url.includes('v1.0')) return
+    
+    // We'll process the body in the searchKeyword function via page.evaluate
+  } catch {}
+}
+
 async function searchKeyword(context: BrowserContext, keyword: string): Promise<ScannedPost[]> {
   const results: ScannedPost[] = []
   const page = await context.newPage()
+
+  // Intercept API responses to capture media IDs
+  const capturedMediaIds: Map<string, string> = new Map()
+  page.on('response', async (response) => {
+    try {
+      const url = response.url()
+      // Look for Threads API responses containing post data
+      if (url.includes('graphql') || url.includes('threads') && url.includes('api')) {
+        const contentType = response.headers()['content-type'] || ''
+        if (!contentType.includes('json')) return
+        
+        const text = await response.text().catch(() => '')
+        if (!text) return
+        
+        // Look for patterns: "code":"SHORTCODE" near "pk":"MEDIA_ID" or "id":"MEDIA_ID"
+        // Threads GraphQL responses contain both shortcode and pk (media ID)
+        const matches = text.matchAll(/"code"\s*:\s*"([^"]+)"/g)
+        for (const match of matches) {
+          const shortcode = match[1]
+          // Look for the pk/id field near this shortcode in the same JSON block
+          const nearby = text.substring(Math.max(0, match.index! - 500), match.index! + 500)
+          
+          // Try to find "pk":"NUMBER" or "id":"NUMBER" (18-20 digit)
+          const pkMatch = nearby.match(/"(?:pk|id)"\s*:\s*"?(\d{17,20})"?/)
+          if (pkMatch) {
+            capturedMediaIds.set(shortcode, pkMatch[1])
+          }
+        }
+        
+        // Also try the Threads-specific format: "text_post_app_info":{"direct_reply_to_media_id":"..."}
+        // Or "pk":"...", "code":"..."
+        const pkCodePairs = text.matchAll(/"pk"\s*:\s*"?(\d{17,20})"?[^}]{0,200}"code"\s*:\s*"([^"]+)"/g)
+        for (const match of pkCodePairs) {
+          capturedMediaIds.set(match[2], match[1])
+        }
+        
+        const codePkPairs = text.matchAll(/"code"\s*:\s*"([^"]+)"[^}]{0,200}"pk"\s*:\s*"?(\d{17,20})"?/g)
+        for (const match of codePkPairs) {
+          capturedMediaIds.set(match[1], match[2])
+        }
+      }
+    } catch {}
+  })
 
   try {
     const url = `https://www.threads.net/search?q=${encodeURIComponent(keyword)}`
@@ -53,19 +109,6 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
         likes: number
       }> = []
 
-      // Grab all visible content blocks
-      const allText = document.querySelectorAll('span[dir="auto"]')
-      const allLinks = document.querySelectorAll('a[href*="/post/"]')
-
-      // Build a map of postId -> link
-      const postLinks = new Map<string, string>()
-      allLinks.forEach((el) => {
-        const a = el as HTMLAnchorElement
-        const match = a.href.match(/\/post\/([^?/]+)/)
-        if (match) postLinks.set(match[1], a.href)
-      })
-
-      // Try to get structured data
       const articles = document.querySelectorAll('article, [role="article"], [data-pressable-container]')
       
       if (articles.length > 0) {
@@ -73,7 +116,7 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
           try {
             const spans = article.querySelectorAll('span[dir="auto"]')
             let fullText = ''
-            spans.forEach(s => { if (s.textContent) fullText += s.textContent + ' ' })
+            spans.forEach((s: Element) => { if (s.textContent) fullText += s.textContent + ' ' })
             fullText = fullText.trim()
 
             const userMatch = article.innerHTML.match(/href="\/@([^"]+)"/)
@@ -89,15 +132,24 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
             }
           } catch {}
         })
-      } else {
-        // Fallback: just grab postId from links and nearby text
+      }
+
+      // Fallback
+      if (items.length === 0) {
+        const allLinks = document.querySelectorAll('a[href*="/post/"]')
+        const postLinks = new Map<string, string>()
+        allLinks.forEach((el) => {
+          const a = el as HTMLAnchorElement
+          const match = a.href.match(/\/post\/([^?/]+)/)
+          if (match) postLinks.set(match[1], a.href)
+        })
         postLinks.forEach((link, postId) => {
           const el = document.querySelector(`a[href*="/post/${postId}"]`)
           if (el) {
             const parent = el.closest('div')?.parentElement
             const text = parent?.textContent?.trim() || ''
             if (text.length > 20) {
-              const userMatch = parent?.innerHTML?.match(/href="\/@([^"]+)"/)
+              const userMatch = parent?.innerHTML.match(/href="\/@([^"]+)"/)
               items.push({
                 text: text.substring(0, 600),
                 username: userMatch?.[1] || '',
@@ -118,8 +170,11 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
       if (seen.has(post.postId)) continue
       seen.add(post.postId)
 
+      // Use captured media ID if available, otherwise use shortcode
+      const mediaId = capturedMediaIds.get(post.postId) || post.postId
+
       results.push({
-        threadsPostId: post.postId,
+        threadsPostId: mediaId,
         authorName: post.username || 'unknown',
         content: post.text,
         likeCount: post.likes || 0,
@@ -131,7 +186,7 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
       if (results.length >= MAX_RESULTS) break
     }
 
-    console.log(`  ✅ Found ${results.length} posts`)
+    console.log(`  ✅ Found ${results.length} posts (${capturedMediaIds.size} media IDs captured)`)
   } catch (e: any) {
     console.error(`  ❌ Error: ${e.message.substring(0, 100)}`)
   } finally {
@@ -177,7 +232,7 @@ async function runScan() {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-blink-features=AutomationControlled',
-        '--disable-dev-shm-usage',  // Important for GitHub Actions
+        '--disable-dev-shm-usage',
       ],
     })
 
@@ -191,7 +246,6 @@ async function runScan() {
     for (const keyword of KEYWORDS) {
       const posts = await searchKeyword(context, keyword)
       allPosts.push(...posts)
-      // Random delay to look more human
       await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000))
     }
 
