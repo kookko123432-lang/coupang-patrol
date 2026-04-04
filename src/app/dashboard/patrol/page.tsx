@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   Plus, Trash2, ChevronDown, ChevronRight, ExternalLink, Sparkles,
   Send, SkipForward, Heart, MessageCircle, Clock, RefreshCw,
-  Package, Search, Link2, Settings2, LogIn, Edit3, X, Check, Tag
+  Package, Search, Link2, LogIn, Edit3, X, Check, Tag,
+  Play, Timer, Zap, Radio
 } from 'lucide-react'
 import { useAccount } from '@/lib/account-context'
 
@@ -25,6 +26,7 @@ interface Product {
   category: string
   active: boolean
   keywords: ProductKeyword[]
+  accountId?: string
   createdAt: string
 }
 
@@ -40,7 +42,7 @@ interface ScanPost {
   scannedAt: string
   status: string
   productId?: string
-  reply?: { content: string; status: string }
+  accountId?: string
 }
 
 // ---- Main Page ----
@@ -55,6 +57,9 @@ export default function PatrolPage() {
   const [generating, setGenerating] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [message, setMessage] = useState('')
+  const [triggering, setTriggering] = useState(false)
+  const [lastScanTime, setLastScanTime] = useState<string | null>(null)
+  const [scanStatus, setScanStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
 
   // New product form
   const [showNewProduct, setShowNewProduct] = useState(false)
@@ -75,18 +80,71 @@ export default function PatrolPage() {
       fetch('/api/scan').then(r => r.json()),
     ])
     setProducts(Array.isArray(prodRes) ? prodRes : prodRes.products || [])
-    setPosts(Array.isArray(postRes) ? postRes : [])
+    const allPosts = Array.isArray(postRes) ? postRes : []
+    setPosts(allPosts)
+    // Find latest scan time
+    if (allPosts.length > 0) {
+      const latest = allPosts.reduce((a: string, b: ScanPost) =>
+        new Date(a).getTime() > new Date(b.scannedAt).getTime() ? a : b.scannedAt
+      , allPosts[0].scannedAt)
+      setLastScanTime(latest)
+    }
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
 
+  // ---- Filter by selected account ----
+  const accountProducts = selectedAccount
+    ? products.filter(p => !p.accountId || p.accountId === selectedAccount.id || p.accountId === 'global')
+    : []
+
+  const accountPosts = selectedAccount
+    ? posts.filter(post => {
+        // Find which product this post belongs to
+        const matchedProduct = products.find(p =>
+          p.keywords.some(kw => kw.text === post.keyword)
+        )
+        if (!matchedProduct) return false
+        // Product belongs to current account, or is global
+        return !matchedProduct.accountId || matchedProduct.accountId === selectedAccount.id || matchedProduct.accountId === 'global'
+      })
+    : []
+
+  // ---- Trigger Patrol ----
+  async function triggerPatrol() {
+    setTriggering(true)
+    setScanStatus('running')
+    setMessage('')
+    try {
+      const res = await fetch('/api/scan/trigger', { method: 'POST' })
+      const data = await res.json()
+      if (data.ok) {
+        setScanStatus('done')
+        setMessage('🚀 巡邏已啟動！掃描器正在背景執行，約 2-3 分鐘後結果會出現')
+      } else {
+        setScanStatus('error')
+        setMessage(`❌ 啟動失敗：${data.error}`)
+      }
+    } catch (e: any) {
+      setScanStatus('error')
+      setMessage(`❌ ${e.message}`)
+    } finally {
+      setTriggering(false)
+    }
+  }
+
   // ---- Product CRUD ----
   async function addProduct() {
-    if (!newProductName.trim()) return
+    if (!newProductName.trim() || !selectedAccount) return
     await fetch('/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newProductName, affiliateUrl: newProductUrl, description: '' }),
+      body: JSON.stringify({
+        name: newProductName,
+        affiliateUrl: newProductUrl || '',
+        description: '',
+        accountId: selectedAccount.id,
+      }),
     })
     setNewProductName('')
     setNewProductUrl('')
@@ -142,10 +200,16 @@ export default function PatrolPage() {
     setGenerating(true)
     setMessage('')
     try {
+      const product = getProductForPost(post)
       const res = await fetch('/api/replies/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ postContent: post.content, authorName: post.authorName, productInfo: getProductForPost(post)?.name || '' }),
+        body: JSON.stringify({
+          postContent: post.content,
+          authorName: post.authorName,
+          productInfo: product?.name || '',
+          affiliateUrl: product?.affiliateUrl || '',
+        }),
       })
       const data = await res.json()
       setReplyContent(data.content || '')
@@ -159,7 +223,7 @@ export default function PatrolPage() {
   }
 
   async function publishReply() {
-    if (!selectedPost || !replyContent) return
+    if (!selectedPost || !replyContent || !selectedAccount) return
     setPublishing(true)
     try {
       const res = await fetch('/api/replies/publish', {
@@ -169,7 +233,7 @@ export default function PatrolPage() {
           content: replyContent,
           threadsPostId: selectedPost.threadsPostId,
           authorName: selectedPost.authorName,
-          accountId: selectedAccount?.id,
+          accountId: selectedAccount.id,
         }),
       })
       const data = await res.json()
@@ -191,22 +255,19 @@ export default function PatrolPage() {
   // ---- Helpers ----
   function getProductForPost(post: ScanPost): Product | undefined {
     if (post.productId) return products.find(p => p.id === post.productId)
-    // Match by keyword
     return products.find(p => p.keywords.some(kw => kw.text === post.keyword))
   }
 
   function getPostsForProduct(productId: string): ScanPost[] {
     const product = products.find(p => p.id === productId)
     if (!product) return []
-    return posts.filter(post => {
+    return accountPosts.filter(post => {
       if (post.productId === productId) return true
       return product.keywords.some(kw => kw.text === post.keyword)
     })
   }
 
   function getKeywordStats(productId: string) {
-    const product = products.find(p => p.id === productId)
-    if (!product) return { total: 0, new: 0, replied: 0 }
     const productPosts = getPostsForProduct(productId)
     return {
       total: productPosts.length,
@@ -214,6 +275,10 @@ export default function PatrolPage() {
       replied: productPosts.filter(p => p.status === 'replied').length,
     }
   }
+
+  // Total stats for selected account
+  const totalNew = accountPosts.filter(p => p.status === 'new').length
+  const totalReplied = accountPosts.filter(p => p.status === 'replied').length
 
   // ---- No account ----
   if (!selectedAccount && accounts.length > 0) {
@@ -241,16 +306,80 @@ export default function PatrolPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-100">🚔 巡邏中心</h1>
           <p className="text-gray-400 mt-1 text-sm">
-            管理「商品 → 關鍵字 → 掃描 → 回覆」整個流程
+            {selectedAccount ? `@${selectedAccount.username} 的巡邏` : '管理商品 → 關鍵字 → 掃描 → 回覆'}
           </p>
         </div>
-        <button onClick={loadData} className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-200 transition-colors">
-          <RefreshCw className="w-4 h-4" /> 重新載入
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={loadData} className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-200 transition-colors">
+            <RefreshCw className="w-4 h-4" /> 刷新
+          </button>
+        </div>
+      </div>
+
+      {/* Patrol Control Bar */}
+      <div className="bg-gray-900/50 border border-gray-800/50 rounded-xl p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            {/* Trigger Button */}
+            <button
+              onClick={triggerPatrol}
+              disabled={triggering}
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm text-white font-medium transition-colors"
+            >
+              {triggering ? (
+                <><RefreshCw className="w-4 h-4 animate-spin" /> 掃描中...</>
+              ) : (
+                <><Play className="w-4 h-4" /> 啟動巡邏</>
+              )}
+            </button>
+
+            {/* Status */}
+            <div className="flex items-center gap-3 text-sm">
+              {scanStatus === 'running' && (
+                <span className="flex items-center gap-1.5 text-yellow-400">
+                  <Radio className="w-4 h-4 animate-pulse" /> 掃描進行中...
+                </span>
+              )}
+              {scanStatus === 'done' && (
+                <span className="flex items-center gap-1.5 text-emerald-400">
+                  <Zap className="w-4 h-4" /> 掃描已觸發
+                </span>
+              )}
+            </div>
+
+            {/* Last Scan Time */}
+            {lastScanTime && (
+              <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                <Clock className="w-3.5 h-3.5" />
+                上次掃描：{new Date(lastScanTime).toLocaleString('zh-TW')}
+              </div>
+            )}
+          </div>
+
+          {/* Quick Stats */}
+          <div className="flex items-center gap-4 text-xs">
+            <div className="text-center">
+              <div className="text-lg font-bold text-blue-400">{totalNew}</div>
+              <div className="text-gray-500">待回覆</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-bold text-emerald-400">{totalReplied}</div>
+              <div className="text-gray-500">已回覆</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-bold text-gray-400">{accountProducts.length}</div>
+              <div className="text-gray-500">商品</div>
+            </div>
+            <div className="flex items-center gap-1 text-gray-600">
+              <Timer className="w-3.5 h-3.5" />
+              <span>自動巡邏：每小時</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {message && (
-        <div className={`px-4 py-3 rounded-lg text-sm ${message.startsWith('✅') ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+        <div className={`px-4 py-3 rounded-lg text-sm ${message.startsWith('✅') || message.startsWith('🚀') ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
           {message}
         </div>
       )}
@@ -258,11 +387,22 @@ export default function PatrolPage() {
       <div className="grid grid-cols-5 gap-6">
         {/* ===== Left: Products & Posts (3 cols) ===== */}
         <div className="col-span-3 space-y-3">
-          {/* Product List */}
-          {products.map(product => {
+          {accountProducts.length === 0 && (
+            <div className="bg-gray-900/30 border border-gray-800/30 rounded-xl p-8 text-center">
+              <Package className="w-8 h-8 text-gray-700 mx-auto mb-3" />
+              <p className="text-gray-400">
+                @{selectedAccount?.username} 尚未設定商品
+              </p>
+              <p className="text-gray-600 text-xs mt-1">點下方「新增商品」開始</p>
+            </div>
+          )}
+
+          {accountProducts.map(product => {
             const isExpanded = expandedProduct === product.id
             const stats = getKeywordStats(product.id)
             const productPosts = isExpanded ? getPostsForProduct(product.id) : []
+            const newPosts = productPosts.filter(p => p.status === 'new')
+            const repliedPosts = productPosts.filter(p => p.status === 'replied')
 
             return (
               <div key={product.id} className="bg-gray-900/50 border border-gray-800/50 rounded-xl overflow-hidden">
@@ -277,21 +417,15 @@ export default function PatrolPage() {
                   {/* Product Name (editable) */}
                   {editingProduct === product.id ? (
                     <div className="flex items-center gap-2 flex-1" onClick={e => e.stopPropagation()}>
-                      <input
-                        value={editProductName}
-                        onChange={e => setEditProductName(e.target.value)}
+                      <input value={editProductName} onChange={e => setEditProductName(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && renameProduct(product.id)}
-                        className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200"
-                        autoFocus
-                      />
+                        className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200" autoFocus />
                       <button onClick={() => renameProduct(product.id)} className="text-emerald-400 hover:text-emerald-300"><Check className="w-4 h-4" /></button>
                       <button onClick={() => setEditingProduct(null)} className="text-gray-400 hover:text-gray-300"><X className="w-4 h-4" /></button>
                     </div>
                   ) : (
-                    <span
-                      className="font-medium text-gray-200 flex-1"
-                      onDoubleClick={(e) => { e.stopPropagation(); setEditingProduct(product.id); setEditProductName(product.name) }}
-                    >
+                    <span className="font-medium text-gray-200 flex-1"
+                      onDoubleClick={(e) => { e.stopPropagation(); setEditingProduct(product.id); setEditProductName(product.name) }}>
                       {product.name}
                     </span>
                   )}
@@ -313,36 +447,30 @@ export default function PatrolPage() {
 
                   {/* Actions */}
                   <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => deleteProduct(product.id)} className="p-1 text-gray-600 hover:text-red-400 transition-colors" title="刪除商品">
+                    <button onClick={() => deleteProduct(product.id)} className="p-1 text-gray-600 hover:text-red-400 transition-colors" title="刪除">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
 
-                {/* Expanded: Keywords + Posts */}
+                {/* Expanded */}
                 {isExpanded && (
                   <div className="border-t border-gray-800/50">
-                    {/* Keywords Section */}
+                    {/* Keywords */}
                     <div className="px-4 py-3 border-b border-gray-800/30">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">掃描關鍵字</span>
                         {newKeywordFor !== product.id ? (
-                          <button
-                            onClick={() => { setNewKeywordFor(product.id); setNewKeywordText('') }}
-                            className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300"
-                          >
-                            <Plus className="w-3 h-3" /> 新增關鍵字
+                          <button onClick={() => { setNewKeywordFor(product.id); setNewKeywordText('') }}
+                            className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300">
+                            <Plus className="w-3 h-3" /> 新增
                           </button>
                         ) : (
                           <div className="flex items-center gap-1">
-                            <input
-                              value={newKeywordText}
-                              onChange={e => setNewKeywordText(e.target.value)}
+                            <input value={newKeywordText} onChange={e => setNewKeywordText(e.target.value)}
                               onKeyDown={e => e.key === 'Enter' && addKeyword(product.id)}
-                              placeholder="輸入關鍵字..."
-                              className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 w-32"
-                              autoFocus
-                            />
+                              placeholder="輸入關鍵字..." autoFocus
+                              className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 w-32" />
                             <button onClick={() => addKeyword(product.id)} className="text-emerald-400"><Check className="w-3.5 h-3.5" /></button>
                             <button onClick={() => setNewKeywordFor(null)} className="text-gray-400"><X className="w-3.5 h-3.5" /></button>
                           </div>
@@ -350,7 +478,7 @@ export default function PatrolPage() {
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {product.keywords.length === 0 && (
-                          <span className="text-xs text-gray-600">尚未設定關鍵字，點「新增關鍵字」開始</span>
+                          <span className="text-xs text-gray-600">尚未設定關鍵字</span>
                         )}
                         {product.keywords.map(kw => (
                           <span key={kw.id} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-800/80 text-xs">
@@ -370,24 +498,22 @@ export default function PatrolPage() {
                       )}
                     </div>
 
-                    {/* Posts Section */}
+                    {/* Posts */}
                     <div className="max-h-80 overflow-y-auto">
-                      {productPosts.filter(p => p.status === 'new').length === 0 ? (
+                      {newPosts.length === 0 ? (
                         <div className="px-4 py-6 text-center">
                           <Search className="w-6 h-6 text-gray-700 mx-auto mb-2" />
                           <p className="text-xs text-gray-500">
-                            {product.keywords.length === 0 ? '請先新增關鍵字' : '此關鍵字尚無掃描結果'}
+                            {product.keywords.length === 0 ? '請先新增關鍵字' : '此關鍵字尚無掃描結果，點「啟動巡邏」掃描'}
                           </p>
                         </div>
                       ) : (
-                        productPosts.filter(p => p.status === 'new').map(post => (
-                          <div
-                            key={post.id}
+                        newPosts.map(post => (
+                          <div key={post.id}
                             onClick={() => { setSelectedPost(post); setReplyContent('') }}
                             className={`px-4 py-3 border-b border-gray-800/20 cursor-pointer transition-colors ${
                               selectedPost?.id === post.id ? 'bg-blue-500/10' : 'hover:bg-gray-800/20'
-                            }`}
-                          >
+                            }`}>
                             <div className="flex items-center justify-between mb-1">
                               <span className="text-xs font-medium text-gray-300">@{post.authorName}</span>
                               <div className="flex items-center gap-2 text-xs text-gray-600">
@@ -408,6 +534,19 @@ export default function PatrolPage() {
                           </div>
                         ))
                       )}
+                      {repliedPosts.length > 0 && (
+                        <div className="px-4 py-2 border-t border-gray-800/20">
+                          <details className="text-xs text-gray-600">
+                            <summary className="cursor-pointer hover:text-gray-400">已回覆 ({repliedPosts.length})</summary>
+                            {repliedPosts.map(post => (
+                              <div key={post.id} className="py-2 border-b border-gray-800/10 last:border-0">
+                                <span className="text-gray-500">@{post.authorName}</span>
+                                <span className="text-emerald-600 ml-2">✓ 已回覆</span>
+                              </div>
+                            ))}
+                          </details>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -415,25 +554,20 @@ export default function PatrolPage() {
             )
           })}
 
-          {/* Add Product Button */}
+          {/* Add Product */}
           {showNewProduct ? (
             <div className="bg-gray-900/50 border border-blue-500/30 rounded-xl p-4">
-              <div className="text-xs font-medium text-gray-400 mb-3">新增商品</div>
+              <div className="text-xs font-medium text-gray-400 mb-3">
+                新增商品 → @{selectedAccount?.username}
+              </div>
               <div className="space-y-2">
-                <input
-                  value={newProductName}
-                  onChange={e => setNewProductName(e.target.value)}
+                <input value={newProductName} onChange={e => setNewProductName(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && addProduct()}
-                  placeholder="商品名稱（例如：韓國零食）"
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500/50"
-                  autoFocus
-                />
-                <input
-                  value={newProductUrl}
-                  onChange={e => setNewProductUrl(e.target.value)}
+                  placeholder="商品名稱（例如：韓國零食）" autoFocus
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500/50" />
+                <input value={newProductUrl} onChange={e => setNewProductUrl(e.target.value)}
                   placeholder="分潤連結（例如：https://coupang.com/...）"
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500/50"
-                />
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500/50" />
                 <div className="flex gap-2">
                   <button onClick={addProduct} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm text-white">新增</button>
                   <button onClick={() => setShowNewProduct(false)} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-300">取消</button>
@@ -441,11 +575,9 @@ export default function PatrolPage() {
               </div>
             </div>
           ) : (
-            <button
-              onClick={() => setShowNewProduct(true)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-gray-700 hover:border-gray-600 rounded-xl text-sm text-gray-500 hover:text-gray-400 transition-colors"
-            >
-              <Plus className="w-4 h-4" /> 新增商品
+            <button onClick={() => setShowNewProduct(true)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-gray-700 hover:border-gray-600 rounded-xl text-sm text-gray-500 hover:text-gray-400 transition-colors">
+              <Plus className="w-4 h-4" /> 新增商品（給 @{selectedAccount?.username}）
             </button>
           )}
         </div>
@@ -455,7 +587,6 @@ export default function PatrolPage() {
           <div className="bg-gray-900/50 border border-gray-800/50 rounded-xl p-5 sticky top-20">
             {selectedPost ? (
               <div className="space-y-4">
-                {/* Original Post */}
                 <div>
                   <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">原始貼文</h3>
                   <div className="bg-gray-800/50 rounded-lg p-3">
@@ -464,17 +595,15 @@ export default function PatrolPage() {
                   </div>
                   {selectedPost.url && (
                     <a href={selectedPost.url} target="_blank" className="inline-flex items-center gap-1 mt-1.5 text-xs text-blue-400 hover:underline">
-                      <ExternalLink className="w-3 h-3" />在 Threads 查看
+                      <ExternalLink className="w-3 h-3" />查看原文
                     </a>
                   )}
                 </div>
 
-                {/* Reply Content */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      回覆內容
-                      <span className="text-blue-400 ml-1">（以 @{selectedAccount?.username} 發布）</span>
+                      回覆 <span className="text-blue-400">@{selectedAccount?.username}</span>
                     </h3>
                     <button onClick={() => generateReply(selectedPost)} disabled={generating}
                       className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded text-xs text-white">
@@ -482,32 +611,22 @@ export default function PatrolPage() {
                       {generating ? '生成中...' : 'AI 生成'}
                     </button>
                   </div>
-                  <textarea
-                    value={replyContent}
-                    onChange={e => setReplyContent(e.target.value)}
-                    placeholder="點「AI 生成」或手動輸入回覆..."
-                    className="w-full h-36 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 resize-none focus:outline-none focus:border-blue-500/50"
-                  />
+                  <textarea value={replyContent} onChange={e => setReplyContent(e.target.value)}
+                    placeholder="點「AI 生成」或手動輸入..."
+                    className="w-full h-36 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-200 resize-none focus:outline-none focus:border-blue-500/50" />
                 </div>
 
-                {/* Actions */}
                 <div className="flex gap-2">
-                  <button
-                    onClick={publishReply}
-                    disabled={publishing || !replyContent}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg text-sm text-white font-medium"
-                  >
+                  <button onClick={publishReply} disabled={publishing || !replyContent}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg text-sm text-white font-medium">
                     <Send className="w-4 h-4" />
-                    {publishing ? '發布中...' : '發布回覆'}
+                    {publishing ? '發布中...' : `以 @${selectedAccount?.username} 發布`}
                   </button>
-                  <button
-                    onClick={() => {
-                      setPosts(posts.map(p => p.id === selectedPost.id ? { ...p, status: 'skipped' } : p))
-                      setSelectedPost(null)
-                      setReplyContent('')
-                    }}
-                    className="flex items-center gap-1 px-3 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-300"
-                  >
+                  <button onClick={() => {
+                    setPosts(posts.map(p => p.id === selectedPost.id ? { ...p, status: 'skipped' } : p))
+                    setSelectedPost(null)
+                    setReplyContent('')
+                  }} className="flex items-center gap-1 px-3 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-gray-300">
                     <SkipForward className="w-4 h-4" /> 跳過
                   </button>
                 </div>

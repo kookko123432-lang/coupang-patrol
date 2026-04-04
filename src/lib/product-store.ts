@@ -18,6 +18,7 @@ export interface Product {
   category: string
   active: boolean
   keywords: ProductKeyword[]
+  accountId?: string
   createdAt: string
 }
 
@@ -30,7 +31,7 @@ export async function getProducts(): Promise<Product[]> {
   }))
 }
 
-export async function addProduct(data: { name: string; description?: string; affiliateUrl: string; category?: string }) {
+export async function addProduct(data: { name: string; description?: string; affiliateUrl: string; category?: string; accountId?: string }) {
   const products = await getProducts()
   const product: Product = {
     id: `prod_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -40,6 +41,7 @@ export async function addProduct(data: { name: string; description?: string; aff
     category: data.category || '',
     active: true,
     keywords: [],
+    accountId: data.accountId,
     createdAt: new Date().toISOString(),
   }
   products.push(product)
