@@ -83,6 +83,7 @@ export default function ScanPage() {
         body: JSON.stringify({
           content: replyContent,
           threadsPostId: selectedPost.threadsPostId,
+          authorName: selectedPost.authorName,
           replyId: selectedPost.id,
         }),
       })
