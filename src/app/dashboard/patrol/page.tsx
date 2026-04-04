@@ -95,20 +95,11 @@ export default function PatrolPage() {
 
   // ---- Filter by selected account ----
   const accountProducts = selectedAccount
-    ? products.filter(p => !p.accountId || p.accountId === selectedAccount.id || p.accountId === 'global')
+    ? products.filter(p => p.accountId === selectedAccount.id)
     : []
 
-  const accountPosts = selectedAccount
-    ? posts.filter(post => {
-        // Find which product this post belongs to
-        const matchedProduct = products.find(p =>
-          p.keywords.some(kw => kw.text === post.keyword)
-        )
-        if (!matchedProduct) return false
-        // Product belongs to current account, or is global
-        return !matchedProduct.accountId || matchedProduct.accountId === selectedAccount.id || matchedProduct.accountId === 'global'
-      })
-    : []
+  // Show ALL scan results for this account's products + unclassified
+  const accountPosts = selectedAccount ? posts : []
 
   // ---- Trigger Patrol ----
   async function triggerPatrol() {
@@ -276,9 +267,11 @@ export default function PatrolPage() {
     }
   }
 
-  // Total stats for selected account
-  const totalNew = accountPosts.filter(p => p.status === 'new').length
-  const totalReplied = accountPosts.filter(p => p.status === 'replied').length
+  // Total stats — all posts visible for this account
+  const allNewPosts = accountPosts.filter(p => p.status === 'new')
+  const allRepliedPosts = accountPosts.filter(p => p.status === 'replied')
+  const totalNew = allNewPosts.length
+  const totalReplied = allRepliedPosts.length
 
   // ---- No account ----
   if (!selectedAccount && accounts.length > 0) {
@@ -553,6 +546,45 @@ export default function PatrolPage() {
               </div>
             )
           })}
+
+          {/* Uncategorized scan results */}
+          {(() => {
+            // Posts that don't match any product's keywords
+            const matchedKeywords = new Set(
+              accountProducts.flatMap(p => p.keywords.map(kw => kw.text))
+            )
+            const uncategorized = accountPosts.filter(p => !matchedKeywords.has(p.keyword))
+              .filter(p => p.status === 'new')
+            if (uncategorized.length === 0) return null
+            return (
+              <div className="bg-gray-900/50 border border-yellow-500/20 rounded-xl overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <Search className="w-4 h-4 text-yellow-400" />
+                  <span className="font-medium text-gray-200 flex-1">未歸類掃描結果</span>
+                  <span className="text-xs text-yellow-400">{uncategorized.length} 篇</span>
+                </div>
+                <div className="max-h-60 overflow-y-auto">
+                  {uncategorized.map(post => (
+                    <div key={post.id}
+                      onClick={() => { setSelectedPost(post); setReplyContent('') }}
+                      className={`px-4 py-3 border-t border-gray-800/20 cursor-pointer transition-colors ${
+                        selectedPost?.id === post.id ? 'bg-blue-500/10' : 'hover:bg-gray-800/20'
+                      }`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium text-gray-300">@{post.authorName}</span>
+                        <span className="text-xs text-yellow-500">keyword: {post.keyword}</span>
+                      </div>
+                      <p className="text-xs text-gray-400 line-clamp-2">{post.content}</p>
+                      <div className="flex items-center gap-1 mt-1 text-xs text-gray-700">
+                        <Clock className="w-2.5 h-2.5" />
+                        {new Date(post.scannedAt).toLocaleString('zh-TW')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Add Product */}
           {showNewProduct ? (

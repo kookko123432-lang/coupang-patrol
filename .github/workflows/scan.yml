@@ -28,10 +28,21 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Fetch keywords from product store
+        id: keywords
+        run: |
+          KEYWORDS=$(curl -s $APP_URL/api/products/keywords/scan | python3 -c "import sys,json; d=json.load(sys.stdin); print(','.join(d['keywords']))" 2>/dev/null)
+          if [ -z "$KEYWORDS" ]; then
+            echo "⚠️ No keywords from API, using defaults"
+            KEYWORDS="酷澎推薦,尿布推薦,韓國零食,Coupang,酷澎,韓國美妝,省錢好物"
+          fi
+          echo "keywords=$KEYWORDS" >> $GITHUB_OUTPUT
+          echo "📋 Keywords: $KEYWORDS"
+
       - name: Run Threads Scanner
         env:
           APP_URL: https://coupang-patrol.vercel.app
-          KEYWORDS: '酷澎推薦,尿布推薦,韓國零食,Coupang,酷澎,韓國美妝,省錢好物'
+          KEYWORDS: ${{ steps.keywords.outputs.keywords }}
         run: npx tsx scanner/search.ts --once
 
       - name: Scan Summary

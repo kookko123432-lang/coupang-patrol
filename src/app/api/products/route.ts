@@ -2,14 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getProducts, addProduct, updateProduct, deleteProduct } from '@/lib/product-store'
 
 export async function GET() {
-  return NextResponse.json(await getProducts())
+  const products = await getProducts()
+  return NextResponse.json({ products })
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, description, affiliateUrl, category } = await req.json()
-    if (!name || !affiliateUrl) return NextResponse.json({ error: '名稱和連結為必填' }, { status: 400 })
-    const product = await addProduct({ name, description, affiliateUrl, category })
+    const { name, description, affiliateUrl, category, accountId } = await req.json()
+    if (!name) return NextResponse.json({ error: '名稱為必填' }, { status: 400 })
+    const product = await addProduct({ name, description: description || '', affiliateUrl: affiliateUrl || '', category, accountId })
     return NextResponse.json(product)
   } catch { return NextResponse.json({ error: '建立失敗' }, { status: 500 }) }
 }
