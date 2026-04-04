@@ -181,25 +181,6 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
         }
       })
 
-    // Strategy 3: Look for __NEXT_DATA__ or similar script tags with embedded data
-    const scripts = document.querySelectorAll('script[type="application/json"], script:notmodule]')
-    const jsonBlocks: string[] = []
-    scripts.forEach(script => {
-      try {
-        const text = script.textContent
-        // Look for shortcodes near long IDs patterns
-        const shortcodeMatches = [...text.matchAll(/"code"\s*:\s*"([A-Za-z0-9_]{8,15})"/g)]
-        const idMatches = [...text.matchAll(/"(?:media_id|pk|id)"\s*:\s*"?(\d{17,20})"?/g)]
-        
-        for (const sc of shortcodeMatches) {
-          const scText = sc[1]
-          for (const id of idMatches) {
-            capturedMediaIds.set(scText, id[1])
-          }
-        }
-      } catch {}
-    })
-
       // If the above didn't work, try the old article-based approach
       if (items.length === 0) {
         const articles = document.querySelectorAll('article, [role="article"], [data-pressable-container]')
