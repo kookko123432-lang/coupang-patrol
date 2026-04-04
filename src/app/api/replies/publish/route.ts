@@ -17,7 +17,12 @@ export async function POST(req: NextRequest) {
         const publishedId = await replyToPost(threadsPostId, content, accountId || undefined)
         return NextResponse.json({ ok: true, publishedId, message: '已回覆到 Threads！', accountId })
       } catch (replyError: any) {
-        return NextResponse.json({ error: '回覆失敗', message: replyError.message }, { status: 500 })
+        const errMsg = replyError.message || ''
+        let userMsg = errMsg
+        if (errMsg.includes('not a valid threads_media')) {
+          userMsg = '回覆失敗：需要通過 Meta App Review（threads_manage_replies 權限）才能回覆別人的貼文。請到 Meta App Dashboard 提交審核。'
+        }
+        return NextResponse.json({ error: '回覆失敗', message: userMsg }, { status: 500 })
       }
     } else {
       try {

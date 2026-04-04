@@ -153,10 +153,35 @@ export async function replyToPost(postId: string, text: string, accountId?: stri
   const { token, userId } = await getTokenAndUserId(accountId)
   if (!token || !userId) throw new Error('未設定 Threads Token 或帳號')
 
+  // postId might be a long numeric ID from scanner — need to resolve to media container ID
+  // Threads API needs a valid media container ID for reply_to_id
+  let replyToId = postId
+
+  // If postId looks like a long numeric ID (from scanner), try to resolve the shortcode from the URL
+  // and convert it to a proper media container ID via the API
+  if (/^\d{16,20}$/.test(postId)) {
+    // Try to get media container ID from the Threads API
+    // The /{post_id} endpoint returns the media container info
+    try {
+      const resolveRes = await fetch(`${API_BASE}/${postId}?fields=id,shortcode&access_token=${token}`)
+      if (resolveRes.ok) {
+        const data = await resolveRes.json()
+        if (data.id) {
+          replyToId = data.id
+          console.log(`Resolved post ID ${postId} → media ID ${replyToId}`)
+        }
+      } else {
+        console.log(`Could not resolve post ID ${postId}: ${resolveRes.status}`)
+      }
+    } catch (e) {
+      console.log('Failed to resolve post ID:', e)
+    }
+  }
+
   const createRes = await fetch(`${API_BASE}/${userId}/threads?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ media_type: 'TEXT', text, reply_to_id: postId }),
+    body: new URLSearchParams({ media_type: 'TEXT', text, reply_to_id: replyToId }),
   })
   if (!createRes.ok) {
     const err = await createRes.text()

@@ -665,6 +665,7 @@ export default function PatrolPage() {
                     <Send className="w-4 h-4" />
                     {publishing ? '發布中...' : `以 @${selectedAccount?.username} 發布`}
                   </button>
+                  <p className="text-xs text-gray-600 mt-1">⚠️ 回覆別人貼文需通過 Meta App Review（threads_manage_replies）</p>
                   <button onClick={() => {
                     setPosts(posts.map(p => p.id === selectedPost.id ? { ...p, status: 'skipped' } : p))
                     setSelectedPost(null)
