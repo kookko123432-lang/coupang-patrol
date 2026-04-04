@@ -49,39 +49,51 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
   page.on('response', async (response) => {
     try {
       const url = response.url()
-      // Look for Threads API responses containing post data
-      if (url.includes('graphql') || url.includes('threads') && url.includes('api')) {
-        const contentType = response.headers()['content-type'] || ''
-        if (!contentType.includes('json')) return
-        
-        const text = await response.text().catch(() => '')
-        if (!text) return
-        
-        // Look for patterns: "code":"SHORTCODE" near "pk":"MEDIA_ID" or "id":"MEDIA_ID"
-        // Threads GraphQL responses contain both shortcode and pk (media ID)
-        const matches = text.matchAll(/"code"\s*:\s*"([^"]+)"/g)
-        for (const match of matches) {
-          const shortcode = match[1]
-          // Look for the pk/id field near this shortcode in the same JSON block
-          const nearby = text.substring(Math.max(0, match.index! - 500), match.index! + 500)
-          
-          // Try to find "pk":"NUMBER" or "id":"NUMBER" (18-20 digit)
-          const pkMatch = nearby.match(/"(?:pk|id)"\s*:\s*"?(\d{17,20})"?/)
-          if (pkMatch) {
-            capturedMediaIds.set(shortcode, pkMatch[1])
+      const contentType = response.headers()['content-type'] || ''
+      if (!contentType.includes('json')) return
+      
+      const text = await response.text().catch(() => '')
+      if (!text || text.length < 100) return
+      
+      // Log what API endpoints Threads uses (for debugging)
+      if (text.includes('shortcode') || text.includes('"code"')) {
+        console.log(`    🔗 API: ${url.substring(0, 80)}... (${text.length} bytes)`)
+      }
+      
+      // Strategy 1: Look for "code":"SHORTCODE" paired with "pk":"MEDIA_ID"
+      // These can appear in any order within the same JSON block
+      const allCodeMatches = [...text.matchAll(/"code"\s*:\s*"([^"]{8,15})"/g)]
+      const allPkMatches = [...text.matchAll(/"pk"\s*:\s*"?(\d{17,20})"?/g)]
+      
+      if (allCodeMatches.length > 0 && allPkMatches.length > 0) {
+        // Pair them by proximity
+        for (const codeMatch of allCodeMatches) {
+          const code = codeMatch[1]
+          // Find closest pk
+          let closestPk = null
+          let closestDist = Infinity
+          for (const pkMatch of allPkMatches) {
+            const dist = Math.abs((codeMatch.index || 0) - (pkMatch.index || 0))
+            if (dist < closestDist && dist < 2000) {
+              closestDist = dist
+              closestPk = pkMatch[1]
+            }
+          }
+          if (closestPk) {
+            capturedMediaIds.set(code, closestPk)
           }
         }
-        
-        // Also try the Threads-specific format: "text_post_app_info":{"direct_reply_to_media_id":"..."}
-        // Or "pk":"...", "code":"..."
-        const pkCodePairs = text.matchAll(/"pk"\s*:\s*"?(\d{17,20})"?[^}]{0,200}"code"\s*:\s*"([^"]+)"/g)
-        for (const match of pkCodePairs) {
-          capturedMediaIds.set(match[2], match[1])
-        }
-        
-        const codePkPairs = text.matchAll(/"code"\s*:\s*"([^"]+)"[^}]{0,200}"pk"\s*:\s*"?(\d{17,20})"?/g)
-        for (const match of codePkPairs) {
-          capturedMediaIds.set(match[1], match[2])
+      }
+      
+      // Strategy 2: Look for shortcode in URL patterns near media IDs
+      // e.g. "permalink":"/@user/post/SHORTCODE" near "id":"MEDIA_ID"
+      const permalinkMatches = [...text.matchAll(/\/post\/([^"?\/\s]{8,15})/g)]
+      for (const pm of permalinkMatches) {
+        const shortcode = pm[1]
+        const nearby = text.substring(Math.max(0, pm.index! - 1000), pm.index! + 1000)
+        const idMatch = nearby.match(/"id"\s*:\s*"?(\d{17,20})"?/)
+        if (idMatch) {
+          capturedMediaIds.set(shortcode, idMatch[1])
         }
       }
     } catch {}
