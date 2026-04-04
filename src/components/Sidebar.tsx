@@ -10,14 +10,14 @@ import {
   Settings,
   Shield,
   Link2,
+  Siren,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
   { href: '/dashboard', label: '儀表板', icon: LayoutDashboard },
+  { href: '/dashboard/patrol', label: '🚔 巡邏中心', icon: Siren },
   { href: '/dashboard/accounts', label: '帳號管理', icon: Link2 },
-  { href: '/dashboard/products', label: '商品管理', icon: Package },
-  { href: '/dashboard/scan', label: '掃描結果', icon: ScanSearch },
   { href: '/dashboard/analytics', label: '數據分析', icon: BarChart3 },
   { href: '/dashboard/settings', label: '設定', icon: Settings },
 ]
