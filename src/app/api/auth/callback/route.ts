@@ -13,12 +13,14 @@ export async function GET(req: NextRequest) {
   if (errParam) {
     return NextResponse.redirect(new URL('/dashboard/accounts?error=' + encodeURIComponent(errParam), req.url))
   }
+
   if (!code) {
     return NextResponse.redirect(new URL('/dashboard/accounts?error=no_code', req.url))
   }
 
   try {
-    // Step 1: Exchange code for token (correct endpoint: /oauth/access_token)
+    // Step 1: Exchange authorization code for short-lived access token
+    // Docs: https://developers.facebook.com/docs/threads/get-started/get-access-tokens-and-permissions
     const tokenRes = await fetch('https://graph.threads.net/oauth/access_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -30,39 +32,57 @@ export async function GET(req: NextRequest) {
         code,
       }),
     })
-    const tokenData = await tokenRes.json()
-    if (!tokenData.access_token) {
-      console.error('Token exchange failed:', JSON.stringify(tokenData))
+
+    if (!tokenRes.ok) {
+      const errText = await tokenRes.text()
+      console.error('Token exchange failed:', errText)
       return NextResponse.redirect(
-        new URL('/dashboard/accounts?error=token_failed&detail=' + encodeURIComponent(JSON.stringify(tokenData)), req.url)
+        new URL('/dashboard/accounts?error=' + encodeURIComponent('Token exchange failed: ' + errText), req.url)
       )
     }
 
-    let finalToken = tokenData.access_token
-    let expiresIn = tokenData.expires_in || 86400
+    const tokenData = await tokenRes.json()
+    const shortLivedToken = tokenData.access_token
+    const userId = tokenData.user_id
 
-    // Step 2: Try long-lived token
+    if (!shortLivedToken) {
+      return NextResponse.redirect(new URL('/dashboard/accounts?error=no_token', req.url))
+    }
+
+    // Step 2: Exchange short-lived token for long-lived token (60 days)
+    // Docs: https://developers.facebook.com/docs/threads/get-started/long-lived-tokens
+    let finalToken = shortLivedToken
+    let expiresIn = 3600 // default 1 hour
+
     try {
-      const longRes = await fetch(
-        'https://graph.threads.net/v1.0/access_token?grant_type=th_exchange_token&client_id=' + APP_ID + '&client_secret=' + APP_SECRET + '&access_token=' + finalToken
+      const longLivedRes = await fetch(
+        `https://graph.threads.net/v1.0/access_token?grant_type=th_exchange_token&client_id=${APP_ID}&client_secret=${APP_SECRET}&access_token=${shortLivedToken}`
       )
-      const longData = await longRes.json()
-      if (longData.access_token) {
-        finalToken = longData.access_token
-        expiresIn = longData.expires_in || 5184000
+      if (longLivedRes.ok) {
+        const longLivedData = await longLivedRes.json()
+        if (longLivedData.access_token) {
+          finalToken = longLivedData.access_token
+          expiresIn = longLivedData.expires_in || 5183944 // ~60 days
+          console.log('Got long-lived token, expires in:', expiresIn)
+        }
+      } else {
+        console.error('Long-lived token exchange failed (non-fatal):', await longLivedRes.text())
       }
-    } catch {}
+    } catch (e) {
+      console.error('Long-lived token exchange error (non-fatal):', e)
+    }
 
-    // Step 3: Get profile
+    // Step 3: Get user profile
     const profileRes = await fetch(
-      'https://graph.threads.net/v1.0/me?fields=id,username,name&access_token=' + finalToken
+      `https://graph.threads.net/v1.0/me?fields=id,username,name&access_token=${finalToken}`
     )
     const profile = await profileRes.json()
+
     if (!profile.id) {
       return NextResponse.redirect(new URL('/dashboard/accounts?error=profile_failed', req.url))
     }
 
-    // Step 4: Save token
+    // Step 4: Save token to Redis
     await set('threads_token', {
       accessToken: finalToken,
       userId: profile.id,
@@ -93,6 +113,7 @@ export async function GET(req: NextRequest) {
       new URL('/dashboard/accounts?connected=true&username=' + (profile.username || ''), req.url)
     )
   } catch (e: any) {
+    console.error('Auth callback error:', e)
     return NextResponse.redirect(
       new URL('/dashboard/accounts?error=' + encodeURIComponent(e.message), req.url)
     )

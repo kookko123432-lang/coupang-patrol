@@ -3,9 +3,34 @@
 const THREADS_USER_ID = '26463285206638172'
 const API_BASE = 'https://graph.threads.net/v1.0'
 
-// Dynamic token: read from Redis first, fallback to env var
 let cachedToken: string | null = null
 let tokenCheckedAt = 0
+
+async function refreshLongLivedToken(accessToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://graph.threads.net/refresh_access_token?grant_type=th_refresh_token&access_token=${accessToken}`
+    )
+    if (!res.ok) {
+      console.error('Token refresh failed:', await res.text())
+      return null
+    }
+    const data = await res.json()
+    if (data.access_token) {
+      const { set } = await import('./store')
+      await set('threads_token', {
+        accessToken: data.access_token,
+        obtainedAt: new Date().toISOString(),
+        expiresIn: data.expires_in || 5183944,
+      })
+      console.log('Token refreshed, expires in:', data.expires_in)
+      return data.access_token
+    }
+  } catch (e) {
+    console.error('Token refresh error:', e)
+  }
+  return null
+}
 
 export async function getToken(): Promise<string> {
   if (cachedToken && Date.now() - tokenCheckedAt < 300000) return cachedToken
@@ -14,49 +39,31 @@ export async function getToken(): Promise<string> {
     const { get } = await import('./store')
     const data = await get('threads_token')
     if (data?.accessToken) {
+      const obtainedAt = new Date(data.obtainedAt).getTime()
+      const age = Date.now() - obtainedAt
+      // Auto-refresh if token is older than 50 days
+      if (age > 50 * 24 * 60 * 60 * 1000) {
+        const refreshed = await refreshLongLivedToken(data.accessToken)
+        if (refreshed) {
+          cachedToken = refreshed
+          tokenCheckedAt = Date.now()
+          return cachedToken!
+        }
+      }
       cachedToken = data.accessToken
       tokenCheckedAt = Date.now()
       return cachedToken!
     }
   } catch {}
 
-  cachedToken = process.env.THREADS_ACCESS_TOKEN || ''
+  cachedToken = (process.env.THREADS_ACCESS_TOKEN || '').trim()
   tokenCheckedAt = Date.now()
   return cachedToken
-}
-
-export function isTokenConfigured(): boolean {
-  // Sync check — returns true if env var is set or cache is populated
-  return !!(process.env.THREADS_ACCESS_TOKEN || cachedToken)
-}
-
-export async function getProfile() {
-  const token = await getToken()
-  const res = await fetch(`${API_BASE}/${THREADS_USER_ID}?fields=id,username,name&access_token=${token}`)
-  if (!res.ok) throw new Error(`Profile API error: ${res.status}`)
-  return res.json()
-}
-
-export async function getQuota() {
-  const token = await getToken()
-  const res = await fetch(`${API_BASE}/${THREADS_USER_ID}/threads_publishing_limit?fields=quota_usage,config&access_token=${token}`)
-  if (!res.ok) throw new Error(`Quota API error: ${res.status}`)
-  const data = await res.json()
-  return data.data?.[0]
-}
-
-export async function getMyPosts(limit: number = 10) {
-  const token = await getToken()
-  const res = await fetch(`${API_BASE}/${THREADS_USER_ID}/threads?fields=id,text,timestamp,media_type,like_count&limit=${limit}&access_token=${token}`)
-  if (!res.ok) return []
-  const data = await res.json()
-  return data.data || []
 }
 
 export async function publishPost(text: string): Promise<string> {
   const token = await getToken()
 
-  // Step 1: Create media container
   const createRes = await fetch(`${API_BASE}/${THREADS_USER_ID}/threads?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -68,10 +75,8 @@ export async function publishPost(text: string): Promise<string> {
     throw new Error(`Create post error (${createRes.status}): ${err}`)
   }
 
-  const createData = await createRes.json()
-  const mediaId = createData.id
+  const { id: mediaId } = await createRes.json()
 
-  // Step 2: Publish
   const publishRes = await fetch(`${API_BASE}/${THREADS_USER_ID}/threads_publish?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -83,8 +88,8 @@ export async function publishPost(text: string): Promise<string> {
     throw new Error(`Publish error (${publishRes.status}): ${err}`)
   }
 
-  const publishData = await publishRes.json()
-  return publishData.id
+  const { id } = await publishRes.json()
+  return id
 }
 
 export async function replyToPost(postId: string, text: string): Promise<string> {
