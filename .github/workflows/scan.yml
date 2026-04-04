@@ -30,17 +30,18 @@ jobs:
 
       - name: Fetch keywords from product store
         id: keywords
-        env:
-          APP_URL: https://coupang-patrol.vercel.app
         run: |
-          KEYWORDS=$(curl -s $APP_URL/api/products/keywords/scan | python3 -c "import sys,json; d=json.load(sys.stdin); print(','.join(d['keywords']))" 2>/dev/null)
+          RESPONSE=$(curl -sf "$APP_URL/api/products/keywords/scan" 2>/dev/null || echo '{}')
+          KEYWORDS=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); kws=d.get('keywords',[]); print(','.join(kws) if kws else '')" 2>/dev/null || echo "")
           if [ -z "$KEYWORDS" ]; then
             echo "⚠️ No keywords found in product store. Skipping scan."
-            echo "keywords=" >> $GITHUB_OUTPUT
+            echo "keywords=" >> "$GITHUB_OUTPUT"
           else
-            echo "keywords=$KEYWORDS" >> $GITHUB_OUTPUT
+            echo "keywords=$KEYWORDS" >> "$GITHUB_OUTPUT"
             echo "📋 Keywords: $KEYWORDS"
           fi
+        env:
+          APP_URL: https://coupang-patrol.vercel.app
 
       - name: Run Threads Scanner
         if: steps.keywords.outputs.keywords != ''
