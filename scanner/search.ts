@@ -112,18 +112,78 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
       await page.waitForTimeout(1000 + Math.random() * 500)
     }
 
-    // Extract posts from the page
+    // Extract posts from the page - including media IDs from React internals
     const rawPosts = await page.evaluate(() => {
       const items: Array<{
         text: string
         username: string
         postId: string
+        mediaId: string
         likes: number
       }> = []
 
-      const articles = document.querySelectorAll('article, [role="article"], [data-pressable-container]')
+      // Strategy: Look at ALL elements with post links, then walk up to find the nearest
+      // element that also contains a long numeric ID (the Threads media ID)
+      const postLinks = document.querySelectorAll('a[href*="/post/"]')
+      const seen = new Set<string>()
       
-      if (articles.length > 0) {
+      postLinks.forEach(link => {
+        const a = link as HTMLAnchorElement
+        const href = a.getAttribute('href') || ''
+        const postMatch = href.match(/\/post\/([^?/]+)/)
+        if (!postMatch || seen.has(postMatch[1])) return
+        seen.add(postMatch[1])
+        const shortcode = postMatch[1]
+        
+        // Walk up the DOM to find a parent containing both the post content and any data attributes with long IDs
+        let el: HTMLElement | null = link
+        let mediaId = ''
+        let text = ''
+        let username = ''
+        
+        for (let i = 0; i < 15 && el; i++) {
+          el = el.parentElement
+          if (!el) break
+          
+          // Try to find media ID in data attributes or aria attributes
+          const attrs = el.attributes
+          for (let j = 0; j < attrs.length; j++) {
+            const val = attrs[j].value
+            const numMatch = val.match(/^\d{17,20}$/)
+            if (numMatch) {
+              mediaId = numMatch[1]
+            }
+          }
+          
+          // Get text content from this level
+          if (!text && el.textContent && el.textContent.length > 20) {
+            text = el.textContent.trim().substring(0, 600)
+          }
+          
+          // Get username
+          if (!username) {
+            const userEl = el.querySelector('a[href^="/@"]')
+            if (userEl) {
+              const m = userEl.getAttribute('href')?.match(/^\/@([^/]+)/)
+              if (m) username = m[1]
+            }
+          }
+        }
+        
+        if (text.length > 20) {
+          items.push({
+            text,
+            username,
+            postId: shortcode,
+            mediaId,
+            likes: 0,
+          })
+        }
+      })
+
+      // If the above didn't work, try the old article-based approach
+      if (items.length === 0) {
+        const articles = document.querySelectorAll('article, [role="article"], [data-pressable-container]')
         articles.forEach(article => {
           try {
             const spans = article.querySelectorAll('span[dir="auto"]')
@@ -139,37 +199,11 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
                 text: fullText.substring(0, 600),
                 username: userMatch?.[1] || '',
                 postId: postMatch[1],
+                mediaId: '',
                 likes: 0,
               })
             }
           } catch {}
-        })
-      }
-
-      // Fallback
-      if (items.length === 0) {
-        const allLinks = document.querySelectorAll('a[href*="/post/"]')
-        const postLinks = new Map<string, string>()
-        allLinks.forEach((el) => {
-          const a = el as HTMLAnchorElement
-          const match = a.href.match(/\/post\/([^?/]+)/)
-          if (match) postLinks.set(match[1], a.href)
-        })
-        postLinks.forEach((link, postId) => {
-          const el = document.querySelector(`a[href*="/post/${postId}"]`)
-          if (el) {
-            const parent = el.closest('div')?.parentElement
-            const text = parent?.textContent?.trim() || ''
-            if (text.length > 20) {
-              const userMatch = parent?.innerHTML.match(/href="\/@([^"]+)"/)
-              items.push({
-                text: text.substring(0, 600),
-                username: userMatch?.[1] || '',
-                postId,
-                likes: 0,
-              })
-            }
-          }
         })
       }
 
@@ -183,7 +217,7 @@ async function searchKeyword(context: BrowserContext, keyword: string): Promise<
       seen.add(post.postId)
 
       // Use captured media ID if available, otherwise use shortcode
-      const mediaId = capturedMediaIds.get(post.postId) || post.postId
+      const mediaId = capturedMediaIds.get(post.postId) || post.mediaId || post.postId
 
       results.push({
         threadsPostId: mediaId,
