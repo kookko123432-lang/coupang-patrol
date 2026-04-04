@@ -1,4 +1,5 @@
 // Threads API Client - handles all interactions with Threads/Meta API
+// Token is read from Redis at runtime, supports auto-refresh
 
 const THREADS_USER_ID = '26463285206638172'
 const API_BASE = 'https://graph.threads.net/v1.0'
@@ -23,7 +24,7 @@ async function refreshLongLivedToken(accessToken: string): Promise<string | null
         obtainedAt: new Date().toISOString(),
         expiresIn: data.expires_in || 5183944,
       })
-      console.log('Token refreshed, expires in:', data.expires_in)
+      console.log('Token refreshed successfully, expires in:', data.expires_in)
       return data.access_token
     }
   } catch (e) {
@@ -39,9 +40,8 @@ export async function getToken(): Promise<string> {
     const { get } = await import('./store')
     const data = await get('threads_token')
     if (data?.accessToken) {
-      const obtainedAt = new Date(data.obtainedAt).getTime()
-      const age = Date.now() - obtainedAt
-      // Auto-refresh if token is older than 50 days
+      const obtainedAt = data.obtainedAt ? new Date(data.obtainedAt).getTime() : 0
+      // Auto-refresh if older than 50 days
       if (age > 50 * 24 * 60 * 60 * 1000) {
         const refreshed = await refreshLongLivedToken(data.accessToken)
         if (refreshed) {
@@ -74,20 +74,16 @@ export async function publishPost(text: string): Promise<string> {
     const err = await createRes.text()
     throw new Error(`Create post error (${createRes.status}): ${err}`)
   }
-
   const { id: mediaId } = await createRes.json()
-
   const publishRes = await fetch(`${API_BASE}/${THREADS_USER_ID}/threads_publish?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ creation_id: mediaId }),
   })
-
   if (!publishRes.ok) {
     const err = await publishRes.text()
     throw new Error(`Publish error (${publishRes.status}): ${err}`)
   }
-
   const { id } = await publishRes.json()
   return id
 }
@@ -100,25 +96,20 @@ export async function replyToPost(postId: string, text: string): Promise<string>
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ media_type: 'TEXT', text, reply_to_id: postId }),
   })
-
   if (!createRes.ok) {
     const err = await createRes.text()
     throw new Error(`Create reply error: ${err}`)
   }
-
   const { id: mediaId } = await createRes.json()
-
   const publishRes = await fetch(`${API_BASE}/${THREADS_USER_ID}/threads_publish?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ creation_id: mediaId }),
   })
-
   if (!publishRes.ok) {
     const err = await publishRes.text()
     throw new Error(`Publish reply error: ${err}`)
   }
-
   const { id } = await publishRes.json()
   return id
 }
@@ -131,10 +122,3 @@ export async function getPostInsights(postId: string) {
   return data.data || []
 }
 
-export async function getPostReplies(postId: string, limit: number = 10) {
-  const token = await getToken()
-  const res = await fetch(`${API_BASE}/${postId}/replies?fields=id,text,timestamp,username&limit=${limit}&access_token=${token}`)
-  if (!res.ok) return []
-  const data = await res.json()
-  return data.data || []
-}
