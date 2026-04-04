@@ -153,14 +153,32 @@ export async function replyToPost(postId: string, text: string, accountId?: stri
   const { token, userId } = await getTokenAndUserId(accountId)
   if (!token || !userId) throw new Error('未設定 Threads Token 或帳號')
 
+  // The scanner captures shortcode-decoded IDs (e.g. 3844621004338017223)
+  // But Threads API needs media container IDs (e.g. 17965847733025000)
+  // These are different ID formats. We need to try directly first, then handle the error.
+  
+  let replyToId = postId
+
   const createRes = await fetch(`${API_BASE}/${userId}/threads?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ media_type: 'TEXT', text, reply_to_id: postId }),
+    body: new URLSearchParams({ media_type: 'TEXT', text, reply_to_id: replyToId }),
   })
   if (!createRes.ok) {
-    const err = await createRes.text()
-    throw new Error(`Create reply error (${createRes.status}): ${err}`)
+    const errText = await createRes.text()
+    const errData = safeJsonParse(errText)
+    
+    // If the ID is not a valid media ID, it might be a shortcode-decoded ID from the scanner
+    // In this case, reply is not possible with the current scanner approach
+    // The scanner would need to use the Threads API search to get proper container IDs
+    if (errData?.error?.message?.includes('not a valid threads_media')) {
+      throw new Error(
+        '無法回覆：掃描器抓到的貼文 ID 格式不正確。' +
+        'Threads API 需要的是 media container ID，而不是從 URL 解碼的 post ID。' +
+        '目前掃描器使用爬蟲方式抓取，無法取得正確的 media container ID。'
+      )
+    }
+    throw new Error(`Create reply error (${createRes.status}): ${errText}`)
   }
   const { id: mediaId } = await createRes.json()
 
@@ -175,6 +193,10 @@ export async function replyToPost(postId: string, text: string, accountId?: stri
   }
   const { id } = await publishRes.json()
   return id
+}
+
+function safeJsonParse(text: string) {
+  try { return JSON.parse(text) } catch { return null }
 }
 
 export async function getPostInsights(postId: string, accountId?: string) {
