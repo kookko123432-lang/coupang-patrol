@@ -14,17 +14,21 @@ export async function POST(req: NextRequest) {
 
     if (threadsPostId) {
       try {
-        const publishedId = await replyToPost(threadsPostId, content)
+        const publishedId = await replyToPost(threadsPostId, content, accountId || undefined)
         return NextResponse.json({ ok: true, publishedId, message: '已回覆到 Threads！', accountId })
       } catch (replyError: any) {
         return NextResponse.json({ error: '回覆失敗', message: replyError.message }, { status: 500 })
       }
     } else {
-      const publishedId = await publishPost(content)
-      return NextResponse.json({ ok: true, publishedId, message: '已發布到 Threads！', accountId })
+      try {
+        const publishedId = await publishPost(content, accountId || undefined)
+        return NextResponse.json({ ok: true, publishedId, message: '已發布到 Threads！', accountId })
+      } catch (pubError: any) {
+        return NextResponse.json({ error: '發布失敗', message: pubError.message }, { status: 500 })
+      }
     }
   } catch (e: any) {
     console.error('Publish error:', e)
-    return NextResponse.json({ error: '發布失敗', message: e.message }, { status: 500 })
+    return NextResponse.json({ error: '請求處理失敗', message: e.message }, { status: 500 })
   }
 }
