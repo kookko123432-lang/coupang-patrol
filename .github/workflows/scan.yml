@@ -33,13 +33,15 @@ jobs:
         run: |
           KEYWORDS=$(curl -s $APP_URL/api/products/keywords/scan | python3 -c "import sys,json; d=json.load(sys.stdin); print(','.join(d['keywords']))" 2>/dev/null)
           if [ -z "$KEYWORDS" ]; then
-            echo "⚠️ No keywords from API, using defaults"
-            KEYWORDS="酷澎推薦,尿布推薦,韓國零食,Coupang,酷澎,韓國美妝,省錢好物"
+            echo "⚠️ No keywords found in product store. Skipping scan."
+            echo "keywords=" >> $GITHUB_OUTPUT
+          else
+            echo "keywords=$KEYWORDS" >> $GITHUB_OUTPUT
+            echo "📋 Keywords: $KEYWORDS"
           fi
-          echo "keywords=$KEYWORDS" >> $GITHUB_OUTPUT
-          echo "📋 Keywords: $KEYWORDS"
 
       - name: Run Threads Scanner
+        if: steps.keywords.outputs.keywords != ''
         env:
           APP_URL: https://coupang-patrol.vercel.app
           KEYWORDS: ${{ steps.keywords.outputs.keywords }}
